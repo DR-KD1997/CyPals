@@ -1,0 +1,53 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "CyPals",
+  "version": "0.1.0",
+  "identifier": "app.cypals",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:1420",
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "CyPals",
+        "width": 1180,
+        "height": 800,
+        "minWidth": 380,
+        "minHeight": 560
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis", "msi", "deb", "rpm", "appimage"],
+    "category": "Entertainment",
+    "shortDescription": "AI companions on your desktop and phone",
+    "longDescription": "CyPals lets you talk with AI characters shown as 3D models, Live2D avatars or portrait sets, imported from Character Card V1–V3 files, powered by a local model or a cloud service.",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "fileAssociations": [
+      {
+        "ext": ["cypal"],
+        "name": "CyPals companion",
+        "description": "CyPals companion file",
+        "mimeType": "application/x-cypal+zip",
+        "role": "Editor"
+      }
+    ],
+    "linux": {
+      "deb": { "depends": ["libwebkit2gtk-4.1-0", "libgtk-3-0"] }
+    }
+  }
+}
