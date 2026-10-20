@@ -22,8 +22,8 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: npm }
       - run: npm ci
-      - run: npm run typecheck
-      - run: npm test
+      - run: scripts/ci-run.sh typecheck npm run typecheck
+      - run: scripts/ci-run.sh tests npm test
 
   desktop:
     needs: test
@@ -54,8 +54,9 @@ jobs:
       - run: npm ci
       - name: Rust tests
         if: matrix.name == 'linux'
-        run: cargo test --manifest-path src-tauri/Cargo.toml
-      - run: npx tauri build --bundles ${{ matrix.bundles }}
+        run: scripts/ci-run.sh cargo-test cargo test --manifest-path src-tauri/Cargo.toml
+      - run: scripts/ci-run.sh tauri-build npx tauri build --bundles ${{ matrix.bundles }}
+        shell: bash
       - uses: actions/upload-artifact@v4
         with:
           name: cypals-${{ matrix.name }}
@@ -77,13 +78,16 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: npm }
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with: { distribution: temurin, java-version: 17 }
-      - uses: android-actions/setup-android@v3
+      # GitHub's Ubuntu runners ship the Android SDK at $ANDROID_HOME; just add what's missing.
       - name: Install NDK, platform and build tools
         run: |
-          sdkmanager --install "ndk;${NDK_VERSION}" "platforms;android-35" "build-tools;${BUILD_TOOLS}"
+          SDKM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKM" --licenses > /dev/null || true
+          "$SDKM" --install "ndk;${NDK_VERSION}" "platforms;android-35" "build-tools;${BUILD_TOOLS}" > /dev/null
           echo "NDK_HOME=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
+          ls "$ANDROID_HOME/ndk" "$ANDROID_HOME/build-tools"
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
@@ -91,9 +95,9 @@ jobs:
         with: { workspaces: src-tauri }
       - run: npm ci
       - name: Generate Android project
-        run: npx tauri android init --ci
+        run: scripts/ci-run.sh android-init npx tauri android init --ci
       - name: Build APK
-        run: npx tauri android build --apk --ci
+        run: scripts/ci-run.sh android-build npx tauri android build --apk --ci
       - name: Sign APK
         env:
           KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
