@@ -24,6 +24,15 @@ Runs on **Windows**, **Linux** and **Android** (Tauri 2 + React + three.js).
 | Fourth Wall Awareness | Per-companion toggle: the character knows it's an AI voicing a character inside CyPals on your device, keeps its personality, and occasionally remarks on the parasocial nature of the conversation (adjustable frequency, never more than once per four replies). |
 | `.cypal` files | Each companion saves to a single file with its avatars, assets and linked lorebooks. See [`docs/FORMAT.md`](docs/FORMAT.md). |
 
+## Downloads
+
+Builds for Android (APK), Windows (installer `.exe` / `.msi`) and Linux (`.deb`, `.rpm`, AppImage) are made by
+GitHub Actions ([`.github/workflows/build.yml`](.github/workflows/build.yml)). Every push to `main` keeps them as
+workflow artifacts; pushing a tag such as `v0.1.0` publishes them on the Releases page.
+
+The Android APK is signed with the key in the `ANDROID_KEYSTORE_B64`, `ANDROID_KEYSTORE_PASSWORD` and
+`ANDROID_KEY_ALIAS` repository secrets. Without them, CI signs with a temporary key, so that APK can't be updated in place.
+
 ## Getting started
 
 ```bash
