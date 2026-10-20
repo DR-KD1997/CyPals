@@ -116,6 +116,15 @@ jobs:
       - run: npm ci
       - name: Generate Android project
         run: scripts/ci-run.sh android-init npx tauri android init --ci
+      - name: Declare microphone and camera permissions
+        # Voice notes, Call mode and webcam vision; Android asks the user the first time.
+        run: |
+          M=src-tauri/gen/android/app/src/main/AndroidManifest.xml
+          for perm in RECORD_AUDIO MODIFY_AUDIO_SETTINGS CAMERA; do
+            grep -q "android.permission.$perm" "$M" || sed -i "s#<application#<uses-permission android:name=\"android.permission.$perm\" />\n    <application#" "$M"
+          done
+          grep -q 'android.hardware.camera' "$M" || sed -i 's#<application#<uses-feature android:name="android.hardware.camera" android:required="false" />\n    <application#' "$M"
+          grep -n "uses-" "$M"
       - name: Build APK
         run: scripts/ci-run.sh android-build npx tauri android build --apk --ci
       - name: Sign APK

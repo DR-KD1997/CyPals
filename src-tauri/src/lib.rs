@@ -47,6 +47,16 @@ fn startup_files() -> Vec<storage::PickedFile> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let builder = tauri::Builder::default()
+        // Voice notes, Call mode and webcam vision need the mic/camera. The webviews
+        // only ever load CyPals' own bundled UI, and each feature is opt-in inside
+        // the app, so media requests are granted here; Android still shows its
+        // system permission prompt the first time.
+        .on_permission_request(|_webview, kind| match kind {
+            tauri::webview::PermissionKind::Microphone | tauri::webview::PermissionKind::Camera => {
+                tauri::webview::PermissionResponse::Allow
+            }
+            _ => tauri::webview::PermissionResponse::Default,
+        })
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init());

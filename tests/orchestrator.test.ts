@@ -65,10 +65,10 @@ function setup(ids: [string, string][], settings: Partial<ConstructorParameters<
 }
 
 describe("orchestrator", () => {
-  it("caps the roster at three companions", () => {
+  it("caps the roster at three companions", async () => {
     const { orch, comps } = setup([["a", "Ann"], ["b", "Bo"], ["c", "Cy"]]);
     comps.set("d", makeCompanion("d", "Di"));
-    expect(() => orch.addCompanion("d")).toThrow(TooManyCompanionsError);
+    await expect(orch.addCompanion("d")).rejects.toThrow(TooManyCompanionsError);
     expect(() => ConversationOrchestrator.newSession(["1", "2", "3", "4"])).toThrow(TooManyCompanionsError);
   });
 

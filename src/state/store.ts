@@ -4,14 +4,15 @@
  * API keys go to the platform secret store, keyed by profile id.
  */
 import { create } from "zustand";
-import type { Companion, ChatSession, Lorebook, ID } from "../core/types";
+import type { Companion, ChatSession, Lorebook, ID, InteractionMode, Persona, Relationship } from "../core/types";
 import { MAX_ON_SCREEN } from "../core/types";
 import type { LLMProfile } from "../core/llm/types";
 import { profileFromPreset } from "../core/llm/providers";
 import type { TTSEndpoint } from "../core/tts/providers";
 import { DEFAULT_VISION_POLICY, type VisionPolicy } from "../core/vision/policy";
 import { DEFAULT_ORCHESTRATOR_SETTINGS, type OrchestratorSettings, ConversationOrchestrator } from "../core/conversation/orchestrator";
-import type { UserPersona } from "../core/llm/prompt";
+import type { STTSettings } from "../core/stt/providers";
+import { closeConversation, newPersona, newRelationship, relationshipKey, touchRelationship } from "../core/personas";
 import { companionFromCard, exportPngCard, parseCardFile } from "../core/cards/parse";
 import { packCypal, unpackCypal, referencedAssets } from "../core/format/cypal";
 import { parseLorebookJson } from "../core/lorebook/convert";
@@ -22,8 +23,29 @@ import { companionScope, invalidateAssets } from "./assets";
 
 export type View = "stage" | "companions" | "editor" | "lorebooks" | "settings";
 
+export type ThemeMode = "dark" | "light" | "system";
+
+export interface Appearance {
+  theme: ThemeMode;
+  /** Accent / tint colour as hex; surfaces take a little of its hue. */
+  tint: string;
+  /** How strongly surfaces take on the tint (0 = neutral grey, 1 = strongly tinted). */
+  tintStrength: number;
+}
+
+export const DEFAULT_APPEARANCE: Appearance = { theme: "dark", tint: "#8ed5c6", tintStrength: 0.6 };
+
+export interface CallSettings {
+  /** Silence after the user stops talking before the character answers (≥ 3 s). */
+  silenceSeconds: number;
+  /** Start listening automatically when a call opens. */
+  autoListen: boolean;
+}
+
 export interface AppSettings {
-  persona: UserPersona;
+  /** The roles the user plays. */
+  personas: Persona[];
+  defaultPersonaId: ID;
   llmProfiles: LLMProfile[];
   defaultProfileId: ID;
   ttsEndpoints: TTSEndpoint[];
@@ -32,12 +54,20 @@ export interface AppSettings {
   /** Expose the model name to fourth-wall-aware characters. */
   shareModelNameWithCharacters: boolean;
   reduceMotion: boolean;
+  appearance: Appearance;
+  /** Speech-to-text for voice notes and Call mode; null = not set up. */
+  stt: STTSettings | null;
+  call: CallSettings;
+  /** Mode new chats start in (the last one used). */
+  lastMode: InteractionMode;
 }
 
 function defaultSettings(): AppSettings {
   const local = profileFromPreset("ollama");
+  const me = newPersona("User", "");
   return {
-    persona: { name: "User", description: "" },
+    personas: [me],
+    defaultPersonaId: me.id,
     llmProfiles: [local],
     defaultProfileId: local.id,
     ttsEndpoints: [],
@@ -45,6 +75,10 @@ function defaultSettings(): AppSettings {
     orchestrator: { ...DEFAULT_ORCHESTRATOR_SETTINGS },
     shareModelNameWithCharacters: true,
     reduceMotion: false,
+    appearance: { ...DEFAULT_APPEARANCE },
+    stt: null,
+    call: { silenceSeconds: 3, autoListen: true },
+    lastMode: "roleplay",
   };
 }
 
@@ -56,6 +90,8 @@ interface State {
   lorebooks: Record<ID, Lorebook>;
   settings: AppSettings;
   session: ChatSession;
+  /** companionId::personaId → what that companion knows of time spent with that persona. */
+  relationships: Record<string, Relationship>;
   toast: { kind: "info" | "error"; text: string } | null;
 
   load(): Promise<void>;
@@ -80,6 +116,11 @@ interface State {
 
   setSession(s: ChatSession): void;
   setOnScreen(ids: ID[]): void;
+
+  /** Count a message exchanged between a companion and a persona. */
+  noteMessage(companionId: ID, personaId: ID): void;
+  /** A conversation ended: remember its last lines for each companion in it. */
+  closeConversations(session: ChatSession, personaId: ID): void;
 }
 
 const debounce = new Map<string, ReturnType<typeof setTimeout>>();
@@ -101,6 +142,7 @@ function settingsForDisk(s: AppSettings): AppSettings {
     ...s,
     llmProfiles: s.llmProfiles.map((p) => ({ ...p, apiKey: "" })),
     ttsEndpoints: s.ttsEndpoints.map((t) => ({ ...t, apiKey: "" })),
+    stt: s.stt ? { ...s.stt, apiKey: "" } : null,
   };
 }
 
@@ -112,6 +154,7 @@ export const useStore = create<State>((set, get) => ({
   lorebooks: {},
   settings: defaultSettings(),
   session: ConversationOrchestrator.newSession(),
+  relationships: {},
   toast: null,
 
   async load() {
@@ -128,15 +171,34 @@ export const useStore = create<State>((set, get) => ({
       const lb = await p.loadJson<Lorebook>(k);
       if (lb) lorebooks[lb.id] = lb;
     }
-    const saved = await p.loadJson<AppSettings>("settings");
-    const settings = { ...defaultSettings(), ...(saved ?? {}) };
+    const saved = await p.loadJson<AppSettings & { persona?: { name: string; description: string } }>("settings");
+    const settings: AppSettings = { ...defaultSettings(), ...(saved ?? {}) };
+    // 0.1 had a single "You" profile; it becomes the first (default) persona.
+    if (saved?.persona && !saved.personas) {
+      const me = { ...newPersona(saved.persona.name || "User", saved.persona.description ?? ""), id: "ps_you" };
+      settings.personas = [me];
+      settings.defaultPersonaId = me.id;
+    }
+    delete (settings as { persona?: unknown }).persona;
+    if (!settings.personas.length) settings.personas = defaultSettings().personas;
+    if (!settings.personas.some((x) => x.id === settings.defaultPersonaId)) settings.defaultPersonaId = settings.personas[0].id;
+    settings.appearance = { ...DEFAULT_APPEARANCE, ...settings.appearance };
+    settings.call = { ...defaultSettings().call, ...settings.call };
+    settings.call.silenceSeconds = Math.max(3, settings.call.silenceSeconds);
+    settings.orchestrator = { ...DEFAULT_ORCHESTRATOR_SETTINGS, ...settings.orchestrator };
     settings.vision = { ...DEFAULT_VISION_POLICY, ...settings.vision, screen: { ...DEFAULT_VISION_POLICY.screen, ...settings.vision?.screen }, webcam: { ...DEFAULT_VISION_POLICY.webcam, ...settings.vision?.webcam } };
     for (const prof of settings.llmProfiles) prof.apiKey = await p.getSecret(`llm:${prof.id}`);
     for (const t of settings.ttsEndpoints) t.apiKey = await p.getSecret(`tts:${t.id}`);
+    if (settings.stt) settings.stt.apiKey = await p.getSecret("stt:main");
+    const relationships = (await p.loadJson<Record<string, Relationship>>("relationships")) ?? {};
     const session = (await p.loadJson<ChatSession>("session/current")) ?? ConversationOrchestrator.newSession();
     session.companionIds = session.companionIds.filter((id) => companions[id]).slice(0, MAX_ON_SCREEN);
     await p.vision?.setPolicy(settings.vision).catch(() => {});
-    set({ ready: true, companions, lorebooks, settings, session, view: Object.keys(companions).length ? "stage" : "companions" });
+    // Sessions saved by 0.1 had no mode and behaved like Roleplay; brand-new ones use the last mode.
+    session.mode ??= session.messages.length ? "roleplay" : settings.lastMode;
+    // Keep the view when reloading (the overlay window reloads on every save).
+    const view = get().ready ? get().view : Object.keys(companions).length ? "stage" : "companions";
+    set({ ready: true, companions, lorebooks, settings, session, relationships, view });
   },
 
   setView(view, editingId = null) {
@@ -278,6 +340,11 @@ export const useStore = create<State>((set, get) => ({
 
   async setApiKey(profileId, key) {
     const s = get().settings;
+    if (profileId === "stt") {
+      await platform().setSecret("stt:main", key);
+      if (s.stt) await get().updateSettings({ stt: { ...s.stt, apiKey: key } });
+      return;
+    }
     const isTts = s.ttsEndpoints.some((t) => t.id === profileId);
     await platform().setSecret(`${isTts ? "tts" : "llm"}:${profileId}`, key);
     await get().updateSettings(
@@ -290,6 +357,25 @@ export const useStore = create<State>((set, get) => ({
   setSession(session) {
     set({ session: { ...session } });
     persistLater("session/current", () => get().session, 800);
+  },
+
+  noteMessage(companionId, personaId) {
+    const key = relationshipKey(companionId, personaId);
+    const r = get().relationships[key] ?? newRelationship(companionId, personaId);
+    set((st) => ({ relationships: { ...st.relationships, [key]: touchRelationship(r, nowIso()) } }));
+    persistLater("relationships", () => get().relationships, 1500);
+  },
+
+  closeConversations(session, personaId) {
+    const lines = session.messages.filter((m) => m.role === "user" || m.role === "companion").map((m) => ({ name: m.name, text: m.text }));
+    if (!session.messages.some((m) => m.role === "user")) return; // nothing was really said
+    const next = { ...get().relationships };
+    for (const id of session.companionIds) {
+      const key = relationshipKey(id, personaId);
+      next[key] = closeConversation(next[key] ?? newRelationship(id, personaId), lines);
+    }
+    set({ relationships: next });
+    persistLater("relationships", () => get().relationships, 200);
   },
 
   setOnScreen(ids) {

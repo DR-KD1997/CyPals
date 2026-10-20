@@ -10,11 +10,25 @@
  * (*smiles*, *waves*) and simple sentiment cues to pick an expression anyway.
  */
 import { ACTIONS, EXPRESSIONS, type Action, type Expression } from "./types";
+import { canonicalExpression } from "./synonyms";
 
 export interface Segment {
   text: string;
   expression: Expression;
   actions: Action[];
+  /** The model left a blank line after this segment (a paragraph / separate message). */
+  paragraphBreak?: boolean;
+}
+
+/** Join segments back into text, keeping the paragraph breaks the model wrote. */
+export function joinSegments(segments: Segment[]): string {
+  let out = "";
+  segments.forEach((sg, i) => {
+    if (!sg.text) return;
+    if (out) out += segments[i - 1]?.paragraphBreak ? "\n\n" : " ";
+    out += sg.text;
+  });
+  return out.replace(/ +([,;:!?]|\.(?!\.))/g, "$1");
 }
 
 export interface ParsedPerformance {
@@ -27,22 +41,9 @@ export interface ParsedPerformance {
   usedTags: boolean;
 }
 
-const EXPR_SET = new Set<string>(EXPRESSIONS);
-const ALIASES: Record<string, Expression> = {
-  smile: "happy", smiling: "happy", glad: "happy", cheerful: "happy", excited: "joy", laugh: "joy", laughing: "joy",
-  delighted: "joy", ecstatic: "joy", upset: "sad", crying: "sad", tearful: "sad", unhappy: "sad", melancholy: "sad",
-  mad: "angry", annoyed: "angry", irritated: "angry", furious: "angry", shocked: "surprised", surprise: "surprised",
-  astonished: "surprised", scared: "fear", afraid: "fear", nervous: "fear", anxious: "fear", disgusted: "disgust",
-  blush: "embarrassed", blushing: "embarrassed", flustered: "embarrassed", shy: "embarrassed", ponder: "thinking",
-  pondering: "thinking", curious: "thinking", thoughtful: "thinking", smirk: "smug", smirking: "smug", proud: "smug",
-  affectionate: "love", loving: "love", adoring: "love", tired: "sleepy", yawn: "sleepy", puzzled: "confused",
-  calm: "neutral", relaxed: "neutral", default: "neutral",
-};
-
+/** Any synonym, word form or near-typo of an expression → the canonical expression. */
 export function normalizeExpression(name: string): Expression | null {
-  const k = name.trim().toLowerCase().replace(/[\s-]+/g, "_");
-  if (EXPR_SET.has(k)) return k as Expression;
-  return ALIASES[k] ?? null;
+  return canonicalExpression(name);
 }
 
 /** Matches <expr:x>, <expression:x>, <act:x>, <action:x>, and the bracket forms [expr:x] / [act:x]. */
@@ -121,8 +122,13 @@ export function parsePerformance(raw: string, current: Expression = "neutral"): 
 
   const flush = (chunk: string) => {
     const text = chunk.replace(/[ \t]+\n/g, "\n").replace(/[ \t]{2,}/g, " ");
-    if (!text.trim()) return;
-    segments.push({ text: text.trim(), expression: expr, actions: pendingActions });
+    if (!text.trim()) {
+      // A blank line between two tags still separates the paragraphs around it.
+      if (/\n\s*\n/.test(chunk) && segments.length) segments[segments.length - 1].paragraphBreak = true;
+      return;
+    }
+    if (/^\s*\n\s*\n/.test(chunk) && segments.length) segments[segments.length - 1].paragraphBreak = true;
+    segments.push({ text: text.trim(), expression: expr, actions: pendingActions, paragraphBreak: /\n\s*\n\s*$/.test(chunk) });
     pendingActions = [];
   };
 
@@ -154,8 +160,8 @@ export function parsePerformance(raw: string, current: Expression = "neutral"): 
     }
   }
 
-  // Re-join segments; close gaps left before punctuation by removed tags, but keep "… ...ellipsis".
-  const text = segments.map((s) => s.text).filter(Boolean).join(" ").replace(/\s+([,;:!?]|\.(?!\.))/g, "$1");
+  // Re-join segments (keeping paragraph breaks); close gaps left before punctuation by removed tags.
+  const text = joinSegments(segments);
   return {
     segments,
     text,

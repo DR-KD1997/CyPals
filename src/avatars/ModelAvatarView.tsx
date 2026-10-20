@@ -14,11 +14,12 @@ import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { GLTFLoader, type GLTF } from "three/addons/loaders/GLTFLoader.js";
 import { VRMLoaderPlugin, VRMUtils, type VRM } from "@pixiv/three-vrm";
-import type { Companion, ModelAvatar } from "../core/types";
+import { DEFAULT_FRAMING, type AvatarFraming, type Companion, type ModelAvatar } from "../core/types";
 import { live } from "../state/live";
 import { assetUrl } from "../state/assets";
 import { BLINK_GUESSES, GLTF_GUESSES, MOUTH_GUESSES, VRM_EXPRESSIONS } from "./expressionMaps";
 import { GESTURE_DURATION, gesture, type BoneOffsets } from "./gestures";
+import { canonicalExpression } from "../core/synonyms";
 
 interface Props {
   companion: Companion;
@@ -51,7 +52,13 @@ function firstPresent(idx: MorphIndex, names: string[]): string | null {
 
 export function ModelAvatarView({ companion, avatar, framing, reduceMotion, backgroundColor, onError }: Props) {
   const host = useRef<HTMLDivElement>(null);
-  const avatarKey = JSON.stringify(avatar);
+  // Framing changes re-aim the camera live instead of reloading the model.
+  const avatarKey = JSON.stringify({ ...avatar, framing: undefined });
+  const framingRef = useRef<AvatarFraming>(avatar.framing ?? DEFAULT_FRAMING);
+  framingRef.current = avatar.framing ?? DEFAULT_FRAMING;
+  const reframe = useRef<() => void>(() => {});
+  const framingKey = JSON.stringify(framingRef.current);
+  useEffect(() => reframe.current(), [framingKey]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -110,11 +117,20 @@ export function ModelAvatarView({ companion, avatar, framing, reduceMotion, back
         const headY = vrm?.humanoid?.getNormalizedBoneNode("head")?.getWorldPosition(new THREE.Vector3()).y ?? box.max.y - size.y * 0.08;
         // The head bone sits at the base of the skull; eyes are ~7 cm above it.
         const y = avatar.camera.height > 0 ? avatar.camera.height : headY + 0.07;
-        camera.position.set(center.x, y, center.z + avatar.camera.distance);
-        camera.lookAt(center.x, y - 0.05, center.z);
+        // User framing: zoom moves the camera in/out; x/y shift the character within the window.
+        const f = framingRef.current;
+        const dist = avatar.camera.distance / Math.max(0.2, f.zoom);
+        const visH = 2 * dist * Math.tan((camera.fov * Math.PI) / 360);
+        const visW = visH * camera.aspect;
+        const cx = center.x - f.x * visW;
+        const cy = y + f.y * visH;
+        camera.position.set(cx, cy, center.z + dist);
+        camera.lookAt(cx, cy - 0.05, center.z);
       }
       lookTarget.position.copy(camera.position);
     };
+
+    reframe.current = frame;
 
     const onPointer = (e: PointerEvent) => {
       const nx = (e.clientX / window.innerWidth) * 2 - 1;
@@ -139,6 +155,10 @@ export function ModelAvatarView({ companion, avatar, framing, reduceMotion, back
       for (const group of GLTF_GUESSES[expr]) {
         const hit = firstPresent(morphs, group);
         if (hit) out[hit] = 1;
+      }
+      if (!Object.keys(out).length && expr !== "neutral") {
+        // Any shape key whose name is a synonym of the expression ("Sadness", "Embarassed").
+        for (const name of morphs.keys()) if (canonicalExpression(name) === expr) out[name] = 1;
       }
       return out;
     };

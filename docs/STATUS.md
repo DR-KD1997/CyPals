@@ -1,4 +1,4 @@
-# Development status — v0.1.0
+# Development status — v0.2.0
 
 ## Verified
 
@@ -21,11 +21,21 @@ Manually, in the Linux release build (Xvfb + compositor, fake streaming OpenAI-c
   underneath, bubbles and expressions mirrored from the main window, "bring back to the call".
 - 3D: VRM 1.0 sample (pixiv three-vrm) loads; neutral/sad/surprised expressions, A-pose rest, wave gesture.
 
+## Verified in 0.2 (Linux release build, fake model + speech-to-text servers, virtual microphone)
+
+- Settings and personas migrate from 0.1 ("You" becomes the default persona).
+- Chat: own greeting with familiarity (past chats, last lines), narration removed, paragraphs as separate bubbles, voice notes recorded → transcribed → sent and labelled.
+- Call: listening → hearing → 3-second pause countdown → transcription → spoken-style reply → listening again; the mic is ignored while the character talks.
+- Roleplay: card greeting, narration styled, paragraphs kept, regenerate.
+- Avatar framing by drag and scroll on a VRM model without reloading it; call-window options under the preview; Voice & behaviour tab.
+- Light/dark themes and tints (palette contrast is unit-tested for every preset).
+
 ## Not yet verified
 
 - Windows and Android builds (code paths compile-gated with `cfg(desktop)` / `cfg(mobile)`; not built here).
 - Live2D rendering with a real model (needs the user-supplied Cubism Core).
-- Real cloud providers and TTS engines against live endpoints (wire formats are unit-tested).
+- Real cloud providers, TTS and speech-to-text engines against live endpoints (wire formats are unit-tested).
+- Microphone access in the Windows and Android builds (permissions are granted/declared; untested on devices).
 - Screen capture on a real desktop session; webcam capture.
 - Three-companion autonomous conversation in the UI (orchestrator logic is unit-tested).
 

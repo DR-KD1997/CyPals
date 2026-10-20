@@ -17,6 +17,7 @@
 import { strFromU8, strToU8, unzipSync, zipSync, type Zippable } from "fflate";
 import type { Companion, Lorebook } from "../types";
 import { isRecord, nowIso } from "../util";
+import pkg from "../../../package.json";
 
 export const CYPAL_FORMAT = "cypal";
 export const CYPAL_VERSION = 1;
@@ -83,7 +84,7 @@ export function packCypal(bundle: Omit<CypalBundle, "manifest"> & { app?: string
   const manifest: CypalManifest = {
     format: CYPAL_FORMAT,
     version: CYPAL_VERSION,
-    app: bundle.app ?? "CyPals 0.1.0",
+    app: bundle.app ?? `CyPals ${pkg.version}`,
     exportedAt: nowIso(),
     companionId: companion.id,
     name: companion.character.name,

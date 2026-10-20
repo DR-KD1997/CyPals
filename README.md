@@ -14,11 +14,15 @@ Runs on **Windows**, **Linux** and **Android** (Tauri 2 + React + three.js).
 | Area | What's there |
 | --- | --- |
 | Characters | Create from scratch, or import **Character Card V1, V2, V3** (PNG `chara`/`ccv3` chunks, JSON, **CHARX**). Import fills every field, keeps unknown fields for round-tripping, and exports back to V2+V3 PNG. |
-| Avatars | **3D** (VRM 0.x/1.0, GLB, glTF) with shape-key expressions, lip sync, blinking, idle motion, eye contact and gestures (clips or procedural). **Live2D** (Cubism 2–5) with expression/motion mapping and mouth sync. **Portrait sets** keyed by expression with crossfades and optional talking frames. A companion can have several of each and switch mid-call. |
+| Avatars | **3D** (VRM 0.x/1.0, GLB, glTF) with shape-key expressions, lip sync, blinking, idle motion, eye contact and gestures (clips or procedural). **Live2D** (Cubism 2–5) with expression/motion mapping and mouth sync. **Portrait sets** keyed by expression with crossfades and optional talking frames. A companion can have several of each and switch mid-call. Drag, scroll or pinch the preview to zoom and shift the character within its window. Expression names are matched by meaning, so *sadness*, *Surprise* or a misspelt *embarassed* all work. |
 | Lorebooks | Shared library — one lorebook can link to many companions. Imports SillyTavern World Info, Chub and card-embedded books. Keywords/regex, secondary-key logic, constant entries, recursion, token budgets, probability, sticky/cooldown, insert positions incl. at-depth, per-companion filters. |
 | Models | Local (Ollama, LM Studio, KoboldCpp, llama.cpp, text-generation-webui) or cloud (**Gemini**, **Grok**, **OpenRouter**, OpenAI, Anthropic, DeepSeek, Mistral, any OpenAI-compatible URL). Per-companion model override. Streaming everywhere. |
 | Voice | Text bubbles by default. Connect Kokoro, AllTalk, XTTS, GPT-SoVITS, OpenAI TTS, ElevenLabs, any HTTP TTS, or the system voice — then optionally hide the text. Mouth movement follows the audio. |
 | Presentation | Call window (circle, rounded or rectangle) on a colour or image background. On Windows/Linux, a companion can step out of the call and stand **full-body over your desktop** in a click-through overlay. |
+| Modes | **Chat** (text messaging: short messages, no narration, typing indicator), **Call** (a spoken conversation: hands-free mic, the character answers after you've been quiet for at least 3 s), **Roleplay** (classic roleplay-app behaviour with narration and a story log). Chat and Call drop anything between asterisks from every card field, the lore and the history, and characters can open with a greeting of their own that reflects how well they know your persona. |
+| Personas | Play several roles. Pick a default, a preferred persona per companion, and switch mid-chat. Each companion remembers how often it has talked with each persona and how the last conversation ended. |
+| Voice input | A voice-note button in the message field, and hands-free listening in Call mode, transcribed by Whisper (local Speaches/faster-whisper, LocalAI, Groq, OpenAI) or Gemini. |
+| Appearance | Light, dark or system theme, any tint colour and tint strength; contrast is kept readable automatically. |
 | Group calls | Up to **3** companions on screen. They answer when named, reply to each other autonomously (with a chain limit), and can chatter when you're idle. Your message interrupts them. |
 | Vision | **Off by default.** Screen sharing is limited to allowed programs/windows (or everything except a block-list), always excludes password managers, banking/sign-in pages, private windows and CyPals itself, and is re-checked natively before capture. Webcam is a separate opt-in. A notice shows each time an image is shared. |
 | Fourth Wall Awareness | Per-companion toggle: the character knows it's an AI voicing a character inside CyPals on your device, keeps its personality, and occasionally remarks on the parasocial nature of the conversation (adjustable frequency, never more than once per four replies). |
@@ -39,7 +43,7 @@ The Android APK is signed with the key in the `ANDROID_KEYSTORE_B64`, `ANDROID_K
 
 ```bash
 npm install
-npm test               # 68 core tests (cards, lore, prompt, providers, orchestration…)
+npm test               # 106 core tests (cards, lore, prompt, providers, orchestration…)
 npm run dev            # browser preview at http://localhost:1420 (no overlay / screen capture)
 npm run desktop:dev    # the real app on Windows or Linux
 npm run desktop:build  # installers: NSIS/MSI on Windows, .deb/.rpm/AppImage on Linux

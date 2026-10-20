@@ -7,10 +7,11 @@
  * Cubism 2 models additionally need `live2d.min.js`.
  */
 import { useEffect, useRef, useState } from "react";
-import type { Companion, Live2DAvatar } from "../core/types";
+import { DEFAULT_FRAMING, type AvatarFraming, type Companion, type Live2DAvatar } from "../core/types";
 import { live } from "../state/live";
 import { platform } from "../platform";
 import { useStore } from "../state/store";
+import { findExpressionKey } from "../core/synonyms";
 
 interface Props {
   companion: Companion;
@@ -55,7 +56,12 @@ export async function installLive2DCore(): Promise<boolean> {
 
 export function Live2DAvatarView({ companion, avatar, framing, reduceMotion, onError }: Props) {
   const host = useRef<HTMLDivElement>(null);
-  const avatarKey = JSON.stringify(avatar);
+  const avatarKey = JSON.stringify({ ...avatar, framing: undefined });
+  const framingRef = useRef<AvatarFraming>(avatar.framing ?? DEFAULT_FRAMING);
+  framingRef.current = avatar.framing ?? DEFAULT_FRAMING;
+  const relayout = useRef<() => void>(() => {});
+  const framingKey = JSON.stringify(framingRef.current);
+  useEffect(() => relayout.current(), [framingKey]);
   const [needsCore, setNeedsCore] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const notify = useStore((s) => s.notify);
@@ -115,11 +121,13 @@ export function Live2DAvatarView({ companion, avatar, framing, reduceMotion, onE
         const mh = model.internalModel.originalHeight;
         // Call mode crops to the upper body; overlay shows the whole model.
         const s = framing === "overlay" ? Math.min(w / mw, h / mh) : Math.max(w / mw, (h / mh) * 1.9);
-        model.scale.set(s * avatar.scale);
+        const f = framing === "call" ? framingRef.current : DEFAULT_FRAMING;
+        model.scale.set(s * avatar.scale * f.zoom);
         model.anchor.set(0.5, framing === "overlay" ? 0.5 : 0.18);
-        model.position.set(w / 2 + avatar.offset.x * w, (framing === "overlay" ? h / 2 : 0) + avatar.offset.y * h);
+        model.position.set(w / 2 + (avatar.offset.x + f.x) * w, (framing === "overlay" ? h / 2 : 0) + (avatar.offset.y + f.y) * h);
       };
       layout();
+      relayout.current = layout;
       const ro = new ResizeObserver(layout);
       ro.observe(el);
 
@@ -143,7 +151,7 @@ export function Live2DAvatarView({ companion, avatar, framing, reduceMotion, onE
         const st = live(companion.id);
         if (st.expression !== lastExpr) {
           lastExpr = st.expression;
-          const name = avatar.expressionMap[st.expression];
+          const name = avatar.expressionMap[st.expression] ?? avatar.expressionMap[findExpressionKey(avatar.expressionMap as Record<string, string>, st.expression) as keyof typeof avatar.expressionMap];
           if (name) void model.expression(name);
           else if (st.expression === "neutral") model.internalModel.motionManager.expressionManager?.resetExpression();
         }

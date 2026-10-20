@@ -18,6 +18,7 @@ export default defineConfig({
   build: {
     target: "es2022",
     sourcemap: !!process.env.TAURI_ENV_DEBUG,
+    minify: process.env.CYPALS_NO_MINIFY ? false : "esbuild",
     chunkSizeWarningLimit: 2000,
   },
   test: {

@@ -6,7 +6,9 @@ import { ConversationOrchestrator, type OrchestratorEvent } from "../core/conver
 import { createProvider } from "../core/llm/providers";
 import { createTTS, speakableText, type TTSEngine } from "../core/tts/providers";
 import type { PromptImage } from "../core/llm/types";
-import type { Companion, ID } from "../core/types";
+import type { Companion, ID, InteractionMode, Persona } from "../core/types";
+import { familiarityText, personaForCompanions, relationshipKey, sessionPersona } from "../core/personas";
+import { transcribe } from "../core/stt/providers";
 import type { Segment } from "../core/expressions";
 import { platform } from "../platform";
 import { useStore } from "./store";
@@ -35,7 +37,12 @@ class Runtime {
         getCompanion: (id) => useStore.getState().companions[id],
         lorebooks: () => new Map(Object.entries(useStore.getState().lorebooks)),
         providerFor: (c) => this.providerFor(c),
-        user: () => useStore.getState().settings.persona,
+        user: () => this.persona(),
+        familiarity: (c) => {
+          const { relationships } = useStore.getState();
+          const p = this.persona();
+          return familiarityText(relationships[relationshipKey(c.id, p.id)], p.name);
+        },
         device: (c) => this.deviceContext(c),
         captureVision: () => this.captureVision(),
         waitForPlayback: (id) => this.playbackDone.get(id) ?? Promise.resolve(),
@@ -92,10 +99,47 @@ class Runtime {
     this.lastActivity = Date.now();
   }
 
-  async send(text: string, withVision: boolean): Promise<void> {
+  async send(text: string, withVision: boolean, voiceSeconds?: number): Promise<void> {
     this.markActivity();
     this.stopAllSpeech();
-    await this.orch?.sendUserMessage(text, { withVision });
+    await this.orch?.sendUserMessage(text, { withVision, voiceSeconds });
+  }
+
+  /** The persona the user is playing in the current chat. */
+  persona(): Persona {
+    const { settings, session, companions } = useStore.getState();
+    return sessionPersona(settings, session, session.companionIds.map((id) => companions[id]).filter(Boolean));
+  }
+
+  setPersona(id: ID): void {
+    if (!this.orch) return;
+    this.orch.session.personaId = id;
+    useStore.getState().setSession(this.orch.session);
+  }
+
+  /** Switch Chat / Call / Roleplay. Before anyone has said anything, greetings are redone to suit the new mode. */
+  async setMode(mode: InteractionMode): Promise<void> {
+    if (!this.orch) return;
+    this.interrupt();
+    await new Promise((r) => setTimeout(r, 0));
+    const s = this.orch.session;
+    if (s.mode === mode) return;
+    s.mode = mode;
+    void useStore.getState().updateSettings({ lastMode: mode });
+    const untouched = !s.messages.some((m) => m.role === "user");
+    if (untouched) s.messages = [];
+    useStore.getState().setSession(s);
+    if (untouched) await this.orch.regreetAll().catch((e) => useStore.getState().notify("error", (e as Error).message));
+  }
+
+  /** Transcribe recorded speech with the configured speech-to-text engine. */
+  async transcribe(wav: Uint8Array): Promise<string> {
+    const { settings, session, companions } = useStore.getState();
+    const stt = settings.stt;
+    if (!stt) throw new Error("Set up speech-to-text in Settings → Voices to use voice input.");
+    const geminiKey = settings.llmProfiles.find((p) => p.kind === "gemini" && p.apiKey)?.apiKey ?? "";
+    const names = [this.persona().name, ...session.companionIds.map((id) => companions[id]?.character.name).filter(Boolean)];
+    return transcribe({ ...stt, apiKey: stt.apiKey || (stt.kind === "gemini" ? geminiKey : "") }, { wav, hint: names.join(", ") }, platform().fetch);
   }
 
   interrupt(): void {
@@ -104,8 +148,18 @@ class Runtime {
   }
 
   addCompanion(id: ID): void {
-    this.orch?.addCompanion(id);
-    useStore.getState().setSession(this.orch!.session);
+    if (!this.orch) return;
+    const s = this.orch.session;
+    // A chat nobody has spoken in yet adopts the persona this companion prefers.
+    if (!s.messages.some((m) => m.role === "user")) {
+      const { settings, companions } = useStore.getState();
+      const c = companions[id];
+      const others = s.companionIds.map((x) => companions[x]).filter(Boolean);
+      if (c) s.personaId = personaForCompanions(settings, [...others, c]).id;
+    }
+    const p = this.orch.addCompanion(id);
+    useStore.getState().setSession(this.orch.session);
+    p.catch((e) => useStore.getState().notify("error", (e as Error).message));
   }
 
   removeCompanion(id: ID): void {
@@ -115,11 +169,15 @@ class Runtime {
 
   newChat(): void {
     this.interrupt();
-    const ids = useStore.getState().session.companionIds;
+    const old = useStore.getState().session;
+    useStore.getState().closeConversations(old, this.persona().id);
     const s = ConversationOrchestrator.newSession();
+    s.mode = old.mode ?? useStore.getState().settings.lastMode;
+    s.personaId = old.personaId;
     if (this.orch) {
       this.orch.session = s;
-      for (const id of ids) this.orch.addCompanion(id);
+      useStore.getState().setSession(s);
+      for (const id of old.companionIds) this.addCompanion(id);
     }
     useStore.getState().setSession(s);
   }
@@ -193,7 +251,7 @@ class Runtime {
         break;
       case "turn:start":
         this.stopSpeech(e.speakerId);
-        updateLive(e.speakerId, { thinking: true, bubble: "", bubbleVisible: false });
+        updateLive(e.speakerId, { thinking: true, streaming: true, bubble: "", bubbleVisible: false });
         break;
       case "turn:delta": {
         const c = useStore.getState().companions[e.speakerId];
@@ -203,12 +261,13 @@ class Runtime {
       }
       case "turn:end": {
         const id = e.message.speakerId!;
-        updateLive(id, { thinking: false });
+        useStore.getState().noteMessage(id, this.persona().id);
+        updateLive(id, { thinking: false, streaming: false });
         this.playbackDone.set(e.message.id, this.perform(id, e.performance.segments));
         break;
       }
       case "turn:error":
-        updateLive(e.speakerId, { thinking: false });
+        updateLive(e.speakerId, { thinking: false, streaming: false });
         useStore.getState().notify("error", e.error.message);
         break;
       case "expression":
@@ -220,6 +279,15 @@ class Runtime {
   private async perform(id: ID, segments: Segment[]): Promise<void> {
     const c = useStore.getState().companions[id];
     if (!c) return;
+    if ((useStore.getState().session.mode ?? "roleplay") === "chat") {
+      // Texting: nothing is spoken; the face still reacts and gestures still play.
+      for (const sg of segments) {
+        updateLive(id, { expression: sg.expression });
+        sg.actions.forEach((a) => pushAction(id, a));
+        await new Promise((r) => setTimeout(r, Math.min(1500, 250 + sg.text.length * 12)));
+      }
+      return;
+    }
     const tts = this.ttsFor(c);
     const hideText = !!tts && c.voice.hideTextWhenSpeaking;
     const reduceMotion = useStore.getState().settings.reduceMotion;

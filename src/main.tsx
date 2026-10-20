@@ -9,6 +9,7 @@ import { initPlatform } from "./platform";
 import { useStore } from "./state/store";
 import { App } from "./ui/App";
 import { OverlayApp } from "./ui/OverlayApp";
+import { ErrorBoundary } from "./ui/ErrorBoundary";
 
 const isOverlay = new URLSearchParams(location.search).has("overlay");
 
@@ -20,8 +21,8 @@ const isOverlay = new URLSearchParams(location.search).has("overlay");
     if (opened.length) await useStore.getState().importFiles(opened);
   }
   createRoot(document.getElementById("root")!).render(
-    <StrictMode>{isOverlay ? <OverlayApp /> : <App />}</StrictMode>,
+    <StrictMode><ErrorBoundary>{isOverlay ? <OverlayApp /> : <App />}</ErrorBoundary></StrictMode>,
   );
 })().catch((e) => {
-  document.getElementById("root")!.textContent = `CyPals couldn't start: ${(e as Error).message}`;
+  document.getElementById("root")!.textContent = `CyPals couldn't start: ${(e as Error).stack ?? (e as Error).message}`;
 });

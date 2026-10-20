@@ -63,6 +63,18 @@ export type Expression = (typeof EXPRESSIONS)[number];
 export const ACTIONS = ["wave", "nod", "shake_head", "laugh", "shrug", "bow", "think", "clap", "point"] as const;
 export type Action = (typeof ACTIONS)[number] | (string & {});
 
+/**
+ * How the character sits inside the call window: zoom (1 = default framing),
+ * and x/y shift as a fraction of the window (positive = right / down).
+ */
+export interface AvatarFraming {
+  zoom: number;
+  x: number;
+  y: number;
+}
+
+export const DEFAULT_FRAMING: AvatarFraming = { zoom: 1, x: 0, y: 0 };
+
 /** Reference to a binary asset stored inside the .cypal bundle (or app data dir). */
 export interface AssetRef {
   /** Path inside the bundle, e.g. `assets/model.vrm`. */
@@ -74,6 +86,8 @@ export interface ModelAvatar {
   id: ID;
   kind: "model3d";
   label: string;
+  /** Zoom and shift within the call window; missing on files from 0.1 (defaults apply). */
+  framing?: AvatarFraming;
   /** .vrm, .glb or .gltf. */
   model: AssetRef;
   /** Extra animation clips (glTF/VRMA) keyed by action name. */
@@ -93,6 +107,8 @@ export interface Live2DAvatar {
   id: ID;
   kind: "live2d";
   label: string;
+  /** Zoom and shift within the call window; missing on files from 0.1 (defaults apply). */
+  framing?: AvatarFraming;
   /** Path to the .model3.json (Cubism 3+) or .model.json (Cubism 2) entry file. */
   entry: AssetRef;
   /** All files the entry references (textures, .moc3, motions, physics). */
@@ -110,6 +126,8 @@ export interface PortraitAvatar {
   id: ID;
   kind: "portraits";
   label: string;
+  /** Zoom and shift within the call window; missing on files from 0.1 (defaults apply). */
+  framing?: AvatarFraming;
   /** Expression (or action) → one or more images; several = random pick for variety. */
   images: Record<string, AssetRef[]>;
   /** Used when no image matches the current expression. */
@@ -167,6 +185,8 @@ export interface Companion {
   embeddedLorebook: Lorebook | null;
   /** Per-companion LLM override; null = use the app default. */
   llmProfileId: ID | null;
+  /** Persona the user prefers to be when talking to this companion; null = the default persona. */
+  preferredPersonaId?: ID | null;
   behaviour: CompanionBehaviour;
   /** Where this companion came from (for attribution). */
   source: { kind: "created" | "ccv1" | "ccv2" | "ccv3" | "cypal"; origin?: string };
@@ -180,6 +200,40 @@ export interface CompanionBehaviour {
   autonomousChat: boolean;
   /** Seconds of user idle time before the companion may speak unprompted. 0 = never. */
   idleChatterSeconds: number;
+  /**
+   * Chat & Call modes: greet in their own words (aware of how well they know
+   * the user's persona) instead of the card's first message.
+   */
+  spontaneousGreeting?: boolean;
+}
+
+// ───────────────────────────── Modes & personas ─────────────────────────────
+
+/**
+ * - chat: text messaging. Short messages, no narration.
+ * - call: a spoken conversation, hands-free voice in, voice (or bubbles) out.
+ * - roleplay: classic roleplay-app behaviour (narration, card greeting, long-form).
+ */
+export type InteractionMode = "chat" | "call" | "roleplay";
+export const INTERACTION_MODES: InteractionMode[] = ["chat", "call", "roleplay"];
+
+/** A role the user plays. Companions see its name and description as {{user}}. */
+export interface Persona {
+  id: ID;
+  name: string;
+  description: string;
+}
+
+/** What a companion "knows" about time spent with one of the user's personas. */
+export interface Relationship {
+  companionId: ID;
+  personaId: ID;
+  chats: number;
+  messages: number;
+  firstMet: string;
+  lastSeen: string;
+  /** Last few lines of the previous conversation, for continuity in greetings. */
+  recap: { name: string; text: string }[];
 }
 
 // ───────────────────────────── Lorebooks ─────────────────────────────
@@ -265,7 +319,7 @@ export interface ChatMessage {
   autonomous?: boolean;
   /** Swipes / alternate generations. */
   alternates?: string[];
-  attachments?: { kind: "screen" | "webcam" | "image"; description?: string; dataUrl?: string }[];
+  attachments?: { kind: "screen" | "webcam" | "image" | "voice"; description?: string; dataUrl?: string }[];
   createdAt: string;
 }
 
@@ -278,6 +332,10 @@ export interface ChatSession {
   updatedAt: string;
   /** Lorebook sticky/cooldown timers per entry id. */
   loreState: Record<ID, { stickyLeft: number; cooldownLeft: number }>;
+  /** Interaction mode; missing on sessions from 0.1 (treated as roleplay). */
+  mode?: InteractionMode;
+  /** Persona the user is playing in this chat; null = default persona. */
+  personaId?: ID | null;
 }
 
 export const MAX_ON_SCREEN = 3;

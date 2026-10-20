@@ -19,8 +19,17 @@ import { MAX_ON_SCREEN } from "../types";
 import type { LLMProfile, LLMProvider, PromptImage } from "../llm/types";
 import { buildPrompt, speakerBooks, type UserPersona } from "../llm/prompt";
 import { activateLore } from "../lorebook/engine";
-import { parsePerformance, stripTagsForDisplay, type ParsedPerformance } from "../expressions";
+import { joinSegments, parsePerformance, stripTagsForDisplay, type ParsedPerformance } from "../expressions";
 import { createFourthWallScheduler, type DeviceContext, type FourthWallScheduler } from "../fourthWall";
+import { stripAsterisks, stripAsterisksPartial } from "../text";
+import type { InteractionMode } from "../types";
+
+type Autonomy = { addressee: string; kind: "reply" | "initiate" | "idle" | "greeting" };
+
+function formatSeconds(sec: number): string {
+  const s = Math.max(0, Math.round(sec));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}
 import { nowIso, uid } from "../util";
 
 export interface OrchestratorSettings {
@@ -31,6 +40,9 @@ export interface OrchestratorSettings {
   /** Pause between autonomous turns so the user can read / listen (ms). */
   autonomousDelayMs: number;
   mainPrompt: string;
+  /** Overrides for the Chat and Call mode prompts (empty = built-in). */
+  chatPrompt?: string;
+  callPrompt?: string;
   /** Use <expr>/<act> tags (disable for models that handle them badly). */
   performanceTags: boolean;
 }
@@ -55,6 +67,8 @@ export interface OrchestratorDeps {
    * unless the user has enabled it; the orchestrator never captures by itself.
    */
   captureVision?(): Promise<PromptImage[]>;
+  /** How well a companion knows the current persona (used for spontaneous greetings). */
+  familiarity?(c: Companion): string;
   /** Waits for TTS playback etc. before autonomous follow-ups. */
   waitForPlayback?(messageId: ID): Promise<void>;
   random?: () => number;
@@ -125,19 +139,54 @@ export class ConversationOrchestrator {
 
   // ─────────── roster ───────────
 
-  addCompanion(id: ID, greet = true): void {
+  get mode(): InteractionMode {
+    return this.session.mode ?? "roleplay";
+  }
+
+  /**
+   * Put a companion on screen. With `greet`, it opens with a greeting:
+   * in Roleplay (or with spontaneous greetings off) the card's first message;
+   * in Chat & Call, by default, one it writes itself based on how well it knows
+   * the user's persona. Resolves once the greeting is in.
+   */
+  async addCompanion(id: ID, greet = true): Promise<void> {
     if (this.session.companionIds.includes(id)) return;
     if (this.session.companionIds.length >= MAX_ON_SCREEN) throw new TooManyCompanionsError();
     this.session.companionIds.push(id);
-    const c = this.deps.getCompanion(id);
-    if (greet && c?.character.firstMessage && !this.session.messages.some((m) => m.speakerId === id)) {
-      const parsed = parsePerformance(this.macro(c, c.character.firstMessage));
-      this.appendMessage({
-        id: uid("msg"), role: "companion", speakerId: id, name: this.nameOf(c), text: parsed.text,
-        raw: c.character.firstMessage, expression: parsed.finalExpression, actions: parsed.actions, createdAt: nowIso(),
-      }, parsed);
-    }
     this.touch();
+    const c = this.deps.getCompanion(id);
+    if (!greet || !c || this.session.messages.some((m) => m.speakerId === id)) return;
+    await this.greet(c);
+  }
+
+  private async greet(c: Companion): Promise<void> {
+    const plain = this.mode !== "roleplay";
+    if (plain && c.behaviour.spontaneousGreeting !== false) {
+      await this.generateTurn(c, { autonomous: { addressee: this.deps.user().name, kind: "greeting" } });
+      return;
+    }
+    if (!c.character.firstMessage.trim()) return;
+    const raw = this.macro(c, c.character.firstMessage);
+    const parsed = this.finalizeText(parsePerformance(raw));
+    if (!parsed.text) return;
+    this.appendMessage({
+      id: uid("msg"), role: "companion", speakerId: c.id, name: this.nameOf(c), text: parsed.text,
+      raw: c.character.firstMessage, expression: parsed.finalExpression, actions: parsed.actions, createdAt: nowIso(),
+    }, parsed);
+  }
+
+  /** Greet again with everyone on screen (new chat, or a mode change before anyone spoke). */
+  async regreetAll(): Promise<void> {
+    for (const c of this.companions()) {
+      if (!this.session.messages.some((m) => m.speakerId === c.id)) await this.greet(c);
+    }
+  }
+
+  /** Chat & Call: drop *narration* from what's shown and spoken (expressions were already read from it). */
+  private finalizeText(perf: ParsedPerformance): ParsedPerformance {
+    if (this.mode === "roleplay") return perf;
+    const segments = perf.segments.map((sg) => ({ ...sg, text: stripAsterisks(sg.text) })).filter((sg) => sg.text || sg.actions.length);
+    return { ...perf, segments, text: joinSegments(segments) };
   }
 
   removeCompanion(id: ID): void {
@@ -154,7 +203,7 @@ export class ConversationOrchestrator {
     this.abort = null;
   }
 
-  async sendUserMessage(text: string, opts: { withVision?: boolean } = {}): Promise<void> {
+  async sendUserMessage(text: string, opts: { withVision?: boolean; voiceSeconds?: number } = {}): Promise<void> {
     this.interrupt();
     // Let the interrupted turn record its partial reply before the user's message.
     await this.inflight;
@@ -163,6 +212,9 @@ export class ConversationOrchestrator {
     const msg: ChatMessage = { id: uid("msg"), role: "user", name: user.name, text, createdAt: nowIso() };
     const images = opts.withVision && this.deps.captureVision ? await this.deps.captureVision() : [];
     if (images.length) msg.attachments = images.map((i) => ({ kind: i.label?.startsWith("Webcam") ? "webcam" : "screen", description: i.label }));
+    if (opts.voiceSeconds !== undefined) {
+      msg.attachments = [...(msg.attachments ?? []), { kind: "voice", description: `Voice note (${formatSeconds(opts.voiceSeconds)})` }];
+    }
     this.appendMessage(msg);
 
     const token = this.chainToken;
@@ -279,7 +331,7 @@ export class ConversationOrchestrator {
 
   private generateTurn(
     speaker: Companion,
-    opts: { images?: PromptImage[]; autonomous?: { addressee: string; kind: "reply" | "initiate" | "idle" } },
+    opts: { images?: PromptImage[]; autonomous?: Autonomy },
   ): Promise<boolean> {
     const p = this.runTurn(speaker, opts);
     this.inflight = p.catch(() => false);
@@ -288,7 +340,7 @@ export class ConversationOrchestrator {
 
   private async runTurn(
     speaker: Companion,
-    opts: { images?: PromptImage[]; autonomous?: { addressee: string; kind: "reply" | "initiate" | "idle" } },
+    opts: { images?: PromptImage[]; autonomous?: Autonomy },
   ): Promise<boolean> {
     const { provider, profile } = this.deps.providerFor(speaker);
     const user = this.deps.user();
@@ -308,6 +360,9 @@ export class ConversationOrchestrator {
     const prompt = buildPrompt({
       speaker, others, user, history: this.session.messages, lore,
       mainPrompt: this.settings.mainPrompt,
+      mode: this.mode,
+      modePrompts: { chat: this.settings.chatPrompt, call: this.settings.callPrompt },
+      familiarity: opts.autonomous?.kind === "greeting" ? this.deps.familiarity?.(speaker) : undefined,
       performance: this.settings.performanceTags && this.hasExpressiveAvatar(speaker),
       fourthWall: fw,
       contextTokens: profile.contextTokens,
@@ -331,7 +386,7 @@ export class ConversationOrchestrator {
         signal: abort.signal,
         onDelta: (d) => {
           raw += d;
-          this.emit({ type: "turn:delta", messageId, speakerId: speaker.id, displayText: cleanReply(stripTagsForDisplay(raw), speaker, user.name, others) });
+          this.emit({ type: "turn:delta", messageId, speakerId: speaker.id, displayText: this.displayPartial(cleanReply(stripTagsForDisplay(raw), speaker, user.name, others)) });
         },
       });
       raw = res.text || raw;
@@ -355,21 +410,22 @@ export class ConversationOrchestrator {
     messageId: ID,
     speaker: Companion,
     raw: string,
-    autonomous: { addressee: string } | undefined,
+    autonomous: Autonomy | undefined,
     partial: boolean,
   ): boolean {
     const user = this.deps.user();
     const others = this.companions().filter((c) => c.id !== speaker.id);
     const cleaned = cleanReply(raw, speaker, user.name, others);
-    const perf = parsePerformance(cleaned, this.lastExpression.get(speaker.id) ?? "neutral");
+    const perf = this.finalizeText(parsePerformance(cleaned, this.lastExpression.get(speaker.id) ?? "neutral"));
     if (!perf.text.trim()) {
-      this.emit({ type: "turn:error", speakerId: speaker.id, error: new Error("The model returned an empty reply.") });
+      const why = this.mode !== "roleplay" && cleaned.includes("*") ? "only narration in asterisks, which Chat and Call modes leave out" : "an empty reply";
+      this.emit({ type: "turn:error", speakerId: speaker.id, error: new Error(`The model returned ${why}.`) });
       return false;
     }
     const msg: ChatMessage = {
       id: messageId, role: "companion", speakerId: speaker.id, name: this.nameOf(speaker),
       text: perf.text + (partial ? "—" : ""), raw, expression: perf.finalExpression, actions: perf.actions,
-      autonomous: !!autonomous, createdAt: nowIso(),
+      autonomous: !!autonomous && autonomous.kind !== "greeting", createdAt: nowIso(),
     };
     this.appendMessage(msg, perf);
     return true;
@@ -392,6 +448,10 @@ export class ConversationOrchestrator {
 
   private hasExpressiveAvatar(c: Companion): boolean {
     return c.avatars.length > 0;
+  }
+
+  private displayPartial(text: string): string {
+    return this.mode === "roleplay" ? text : stripAsterisksPartial(text);
   }
 
   private nameOf(c: Companion): string {

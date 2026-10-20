@@ -12,6 +12,8 @@ export interface LiveState {
   amplitude: number;
   speaking: boolean;
   thinking: boolean;
+  /** A reply is being generated (its partial text is in `bubble`). */
+  streaming: boolean;
   bubble: string;
   bubbleVisible: boolean;
   /** Gestures waiting to be played; renderers shift() them. */
@@ -27,7 +29,7 @@ const anySubs = new Set<(id: ID) => void>();
 export function live(id: ID): LiveState {
   let s = states.get(id);
   if (!s) {
-    s = { expression: "neutral", amplitude: 0, speaking: false, thinking: false, bubble: "", bubbleVisible: false, actions: [], rev: 0 };
+    s = { expression: "neutral", amplitude: 0, speaking: false, thinking: false, streaming: false, bubble: "", bubbleVisible: false, actions: [], rev: 0 };
     states.set(id, s);
   }
   return s;

@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
-import type { Avatar, Companion, Expression, Live2DAvatar, ModelAvatar, PortraitAvatar } from "../core/types";
-import { ACTIONS, EXPRESSIONS } from "../core/types";
+import { useEffect, useRef, useState } from "react";
+import type { Avatar, AvatarFraming, Companion, Expression, Live2DAvatar, ModelAvatar, PortraitAvatar } from "../core/types";
+import { ACTIONS, DEFAULT_FRAMING, EXPRESSIONS } from "../core/types";
 import { useStore } from "../state/store";
 import { storeAssets, assetUrl } from "../state/assets";
 import { mimeFromExt, parseCardFile } from "../core/cards/parse";
@@ -9,9 +9,11 @@ import { platform } from "../platform";
 import { uid, utf8Decode } from "../core/util";
 import { Icon, NumberInput, Select, Slider, Tabs, TagInput, TextArea, TextInput, Toggle } from "./controls";
 import { AvatarView } from "../avatars/AvatarView";
+import { useCallWindowStyle } from "./CallFrame";
 import { live, pushAction, updateLive } from "../state/live";
+import { canonicalExpression, portraitKeyFor } from "../core/synonyms";
 
-type Tab = "character" | "avatars" | "look" | "behaviour" | "lore";
+type Tab = "character" | "avatars" | "behaviour" | "lore";
 
 export function CompanionEditor() {
   const id = useStore((s) => s.editingId);
@@ -49,16 +51,14 @@ export function CompanionEditor() {
         tabs={[
           { id: "character", label: "Character" },
           { id: "avatars", label: "Avatars" },
-          { id: "look", label: "Look & voice" },
-          { id: "behaviour", label: "Behaviour" },
+          { id: "behaviour", label: "Voice & behaviour" },
           { id: "lore", label: "Lore & model" },
         ]}
       />
       <div className="tab-panel" role="tabpanel">
         {tab === "character" && <CharacterTab c={companion} patch={patch} />}
         {tab === "avatars" && <AvatarsTab c={companion} patch={patch} />}
-        {tab === "look" && <LookTab c={companion} patch={patch} />}
-        {tab === "behaviour" && <BehaviourTab c={companion} patch={patch} />}
+        {tab === "behaviour" && <VoiceBehaviourTab c={companion} patch={patch} />}
         {tab === "lore" && <LoreTab c={companion} patch={patch} />}
       </div>
     </section>
@@ -101,6 +101,7 @@ function CharacterTab({ c, patch }: TabProps) {
         <TextInput label="Name" value={ch.name} onChange={(v) => set("name", v)} />
         <TextInput label="Nickname" value={ch.nickname} onChange={(v) => set("nickname", v)} hint="Used in conversation instead of the name, if set" />
       </div>
+      <PersonaPreference c={c} patch={patch} />
       <TextInput label="Tagline" value={ch.tagline} onChange={(v) => set("tagline", v)} hint="One line shown in your library and to other companions on the call" />
       <TextArea label="Description" rows={7} value={ch.description} onChange={(v) => set("description", v)} />
       <TextArea label="Personality" rows={3} value={ch.personality} onChange={(v) => set("personality", v)} />
@@ -129,6 +130,22 @@ function CharacterTab({ c, patch }: TabProps) {
         <TagInput label="Tags" value={ch.tags} onChange={(v) => set("tags", v)} />
       </details>
     </div>
+  );
+}
+
+function PersonaPreference({ c, patch }: TabProps) {
+  const personas = useStore((s) => s.settings.personas);
+  const defaultId = useStore((s) => s.settings.defaultPersonaId);
+  const setView = useStore((s) => s.setView);
+  const def = personas.find((p) => p.id === defaultId);
+  return (
+    <Select
+      label={`Your persona with ${c.character.nickname || c.character.name || "this companion"}`}
+      value={c.preferredPersonaId ?? ""}
+      onChange={(v) => patch((x) => ({ ...x, preferredPersonaId: v || null }))}
+      options={[{ value: "", label: `Default${def ? ` (${def.name})` : ""}` }, ...personas.map((p) => ({ value: p.id, label: p.name }))]}
+      hint={<>Who you are when a chat with them starts. You can still switch during a chat. <button className="link" onClick={() => setView("settings")}>Manage personas</button></>}
+    />
   );
 }
 
@@ -228,10 +245,10 @@ function AvatarsTab({ c, patch }: TabProps) {
       {avatar ? (
         <div className="avatar-detail">
           <div className="avatar-preview">
-            <div className={`call-window frame-${c.presentation.frame}`} style={{ background: c.presentation.background.type === "color" ? c.presentation.background.color : "#1d2433" }}>
-              <AvatarView companion={{ ...c, activeAvatarId: avatar.id }} framing="call" reduceMotion={reduceMotion} />
-            </div>
+            <FramingPreview c={c} avatar={avatar} update={update} reduceMotion={reduceMotion} />
             <ExpressionTester id={c.id} />
+            <FramingControls avatar={avatar} update={update} />
+            <CallWindowSettings c={c} patch={patch} />
           </div>
           <div className="form">
             <div className="grid-2">
@@ -306,12 +323,15 @@ function ModelSettings({ c, a, update }: { c: Companion; a: ModelAvatar; update(
   };
   return (
     <>
-      <h3>Framing</h3>
-      <div className="grid-3">
-        <NumberInput label="Distance" step={0.05} value={a.camera.distance} onChange={(v) => update({ ...a, camera: { ...a.camera, distance: v } })} />
-        <NumberInput label="Eye height" step={0.02} value={a.camera.height} onChange={(v) => update({ ...a, camera: { ...a.camera, height: v } })} hint="0 = find the head automatically" />
-        <NumberInput label="Field of view" value={a.camera.fov} onChange={(v) => update({ ...a, camera: { ...a.camera, fov: v } })} />
-      </div>
+      <details className="advanced">
+        <summary>Camera</summary>
+        <p className="hint">Zoom and shift under the preview are usually all you need. These set the starting camera.</p>
+        <div className="grid-3">
+          <NumberInput label="Distance" step={0.05} value={a.camera.distance} onChange={(v) => update({ ...a, camera: { ...a.camera, distance: v } })} />
+          <NumberInput label="Eye height" step={0.02} value={a.camera.height} onChange={(v) => update({ ...a, camera: { ...a.camera, height: v } })} hint="0 = find the head automatically" />
+          <NumberInput label="Field of view" value={a.camera.fov} onChange={(v) => update({ ...a, camera: { ...a.camera, fov: v } })} />
+        </div>
+      </details>
       <h3>Expressions → shape keys</h3>
       <p className="hint">VRM models work without setup. For other models, list shape keys with optional weights, e.g. <code>Smile:0.8, EyeSquint:0.3</code>.</p>
       <div className="grid-2">
@@ -344,9 +364,9 @@ function describeLive2D(json: any): { expressions: string[]; motions: string[] }
 
 function guessLive2DExpressions(names: string[]): Live2DAvatar["expressionMap"] {
   const out: Live2DAvatar["expressionMap"] = {};
-  for (const e of EXPRESSIONS) {
-    const hit = names.find((n) => n.toLowerCase().replace(/\.exp3\.json$|\.json$/, "").includes(e));
-    if (hit) out[e] = hit;
+  for (const n of names) {
+    const e = canonicalExpression(n);
+    if (e && !out[e]) out[e] = n;
   }
   return out;
 }
@@ -360,12 +380,6 @@ function Live2DSettings({ c, a, update }: { c: Companion; a: Live2DAvatar; updat
   const motionOpts = [{ value: "", label: "— none —" }, ...info.motions.map((n) => ({ value: n, label: n }))];
   return (
     <>
-      <h3>Framing</h3>
-      <div className="grid-3">
-        <Slider label="Scale" min={0.3} max={3} step={0.05} value={a.scale} onChange={(v) => update({ ...a, scale: v })} format={(v) => `${v.toFixed(2)}×`} />
-        <Slider label="Horizontal offset" min={-0.5} max={0.5} step={0.01} value={a.offset.x} onChange={(v) => update({ ...a, offset: { ...a.offset, x: v } })} />
-        <Slider label="Vertical offset" min={-0.5} max={0.5} step={0.01} value={a.offset.y} onChange={(v) => update({ ...a, offset: { ...a.offset, y: v } })} />
-      </div>
       <h3>Expressions</h3>
       {info.expressions.length === 0 && <p className="hint">This model defines no expressions; its face will only animate with lip sync and motions.</p>}
       <div className="grid-2">
@@ -391,8 +405,7 @@ function Live2DSettings({ c, a, update }: { c: Companion; a: Live2DAvatar; updat
 }
 
 function keyFromFilename(name: string): string {
-  const base = name.split(/[\\/]/).pop()!.replace(/\.\w+$/, "").toLowerCase();
-  return base.replace(/[\s-]+/g, "_").replace(/_?\d+$/, "") || "neutral";
+  return portraitKeyFor(name);
 }
 
 function PortraitSettings({ c, a, update }: { c: Companion; a: PortraitAvatar; update(a: Avatar): void }) {
@@ -458,34 +471,161 @@ function PortraitSettings({ c, a, update }: { c: Companion; a: PortraitAvatar; u
   );
 }
 
-// ───────────────────────── Look & voice ─────────────────────────
+// ───────────────────────── Framing ─────────────────────────
 
-function LookTab({ c, patch }: TabProps) {
-  const tts = useStore((s) => s.settings.ttsEndpoints);
-  const notify = useStore((s) => s.notify);
-  const [voices, setVoices] = useState<{ id: string; name: string }[]>([]);
-  const p = c.presentation;
-  const v = c.voice;
-  const setP = (np: Partial<typeof p>) => patch((x) => ({ ...x, presentation: { ...x.presentation, ...np } }));
-  const setV = (nv: Partial<typeof v>) => patch((x) => ({ ...x, voice: { ...x.voice, ...nv } }));
-  const endpoint = tts.find((t) => t.id === v.ttsEndpointId);
-
+/** Avatar preview you can drag to shift and scroll (or pinch) to zoom. */
+function FramingPreview({ c, avatar, update, reduceMotion }: { c: Companion; avatar: Avatar; update(a: Avatar): void; reduceMotion: boolean }) {
+  const style = useCallWindowStyle(c);
+  const f = avatar.framing ?? DEFAULT_FRAMING;
+  const set = (nf: Partial<AvatarFraming>) => update({ ...avatar, framing: clampFraming({ ...f, ...nf }) });
+  const drag = useRef<{ x: number; y: number; f: AvatarFraming; w: number; h: number } | null>(null);
+  const pinch = useRef<{ d: number; zoom: number } | null>(null);
+  const pointers = useRef(new Map<number, { x: number; y: number }>());
+  // React's wheel listeners are passive, so the page would scroll too; use a native one.
+  const el = useRef<HTMLDivElement>(null);
+  const latest = useRef({ f, set });
+  latest.current = { f, set };
   useEffect(() => {
-    if (!endpoint) return setVoices([]);
-    void createTTS(endpoint, platform().fetch).listVoices().then(setVoices).catch(() => setVoices([]));
-  }, [endpoint]);
+    const node = el.current;
+    if (!node) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const { f: cur, set: apply } = latest.current;
+      apply({ zoom: cur.zoom * Math.exp(-e.deltaY * 0.0015) });
+    };
+    node.addEventListener("wheel", onWheel, { passive: false });
+    return () => node.removeEventListener("wheel", onWheel);
+  }, []);
+  return (
+    <div
+      ref={el}
+      className={`call-window frame-${c.presentation.frame} framing-target`}
+      style={style}
+      title="Drag to move · scroll or pinch to zoom"
+      onPointerDown={(e) => {
+        e.preventDefault();
+        (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+        pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        const r = e.currentTarget.getBoundingClientRect();
+        if (pointers.current.size === 2) {
+          const [a, b] = [...pointers.current.values()];
+          pinch.current = { d: Math.hypot(a.x - b.x, a.y - b.y), zoom: f.zoom };
+          drag.current = null;
+        } else {
+          drag.current = { x: e.clientX, y: e.clientY, f, w: r.width, h: r.height };
+        }
+      }}
+      onPointerMove={(e) => {
+        if (!pointers.current.has(e.pointerId)) return;
+        pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        if (pinch.current && pointers.current.size === 2) {
+          const [a, b] = [...pointers.current.values()];
+          set({ zoom: pinch.current.zoom * (Math.hypot(a.x - b.x, a.y - b.y) / pinch.current.d) });
+        } else if (drag.current) {
+          const d = drag.current;
+          set({ x: d.f.x + (e.clientX - d.x) / d.w, y: d.f.y + (e.clientY - d.y) / d.h });
+        }
+      }}
+      onPointerUp={(e) => {
+        pointers.current.delete(e.pointerId);
+        if (pointers.current.size < 2) pinch.current = null;
+        if (!pointers.current.size) drag.current = null;
+      }}
+      onPointerCancel={(e) => pointers.current.delete(e.pointerId)}
+    >
+      <AvatarView companion={{ ...c, activeAvatarId: avatar.id }} framing="call" reduceMotion={reduceMotion} />
+    </div>
+  );
+}
 
+function clampFraming(f: AvatarFraming): AvatarFraming {
+  const r = (n: number) => Math.round(n * 1000) / 1000;
+  return { zoom: r(Math.min(4, Math.max(0.3, f.zoom))), x: r(Math.min(0.8, Math.max(-0.8, f.x))), y: r(Math.min(0.8, Math.max(-0.8, f.y))) };
+}
+
+function FramingControls({ avatar, update }: { avatar: Avatar; update(a: Avatar): void }) {
+  const f = avatar.framing ?? DEFAULT_FRAMING;
+  const set = (nf: Partial<AvatarFraming>) => update({ ...avatar, framing: clampFraming({ ...f, ...nf }) });
+  const moved = f.zoom !== 1 || f.x !== 0 || f.y !== 0;
+  return (
+    <div className="framing">
+      <div className="row framing-head">
+        <h3>Position in the window</h3>
+        <button className="btn btn-quiet" disabled={!moved} onClick={() => update({ ...avatar, framing: { ...DEFAULT_FRAMING } })}>Reset</button>
+      </div>
+      <Slider label="Zoom" min={0.3} max={4} step={0.05} value={f.zoom} onChange={(zoom) => set({ zoom })} format={(v) => `${Math.round(v * 100)}%`} />
+      <Slider label="Left / right" min={-0.8} max={0.8} step={0.01} value={f.x} onChange={(x) => set({ x })} format={(v) => (Math.abs(v) < 0.005 ? "Centred" : `${Math.round(Math.abs(v) * 100)}% ${v < 0 ? "left" : "right"}`)} />
+      <Slider label="Up / down" min={-0.8} max={0.8} step={0.01} value={f.y} onChange={(y) => set({ y })} format={(v) => (Math.abs(v) < 0.005 ? "Centred" : `${Math.round(Math.abs(v) * 100)}% ${v < 0 ? "up" : "down"}`)} />
+    </div>
+  );
+}
+
+// ───────────────────────── Call window ─────────────────────────
+
+function CallWindowSettings({ c, patch }: TabProps) {
+  const p = c.presentation;
+  const setP = (np: Partial<typeof p>) => patch((x) => ({ ...x, presentation: { ...x.presentation, ...np } }));
   const pickBackground = async () => {
     const [f] = await platform().pickFiles({ accept: ["png", "jpg", "jpeg", "webp"], title: "Background image" });
     if (!f) return;
     const [path] = await storeAssets(c.id, "background", [f]);
     setP({ background: { type: "image", image: { path, mime: mimeFromExt(f.name.split(".").pop()!) }, fit: "cover" } });
   };
+  return (
+    <div className="call-window-settings">
+      <h3>Call window</h3>
+      <Select label="Frame" value={p.frame} onChange={(frame) => setP({ frame })} options={[
+        { value: "circle", label: "Circle" }, { value: "rounded", label: "Rounded rectangle" }, { value: "rectangle", label: "Rectangle" },
+      ]} />
+      <Select label="Dialogue display" value={p.textStyle} onChange={(textStyle) => setP({ textStyle })} options={[
+        { value: "bubble", label: "Speech bubble" }, { value: "popup", label: "Pop-up card" }, { value: "subtitle", label: "Subtitles" },
+      ]} />
+      <Select label="Appears as" value={p.mode} onChange={(mode) => setP({ mode })} options={[
+        { value: "call", label: "Video-call window" },
+        ...(platform().overlay ? [{ value: "overlay" as const, label: "Full body on the desktop" }] : []),
+      ]} hint={platform().overlay ? undefined : "Desktop overlay is available on Windows and Linux"} />
+      <div className="field">
+        <label>Background</label>
+        <div className="row wrap">
+          <input type="color" aria-label="Background colour" value={p.background.type === "color" ? p.background.color : "#1d2433"} onChange={(e) => setP({ background: { type: "color", color: e.target.value } })} />
+          <button className="btn btn-quiet" onClick={pickBackground}>Use an image</button>
+          {p.background.type === "image" && (
+            <select aria-label="Image fit" value={p.background.fit} onChange={(e) => setP({ background: { ...(p.background as { type: "image"; image: { path: string; mime: string }; fit: "cover" }), fit: e.target.value as "cover" | "contain" } })}>
+              <option value="cover">Fill</option>
+              <option value="contain">Fit</option>
+            </select>
+          )}
+        </div>
+      </div>
+      {platform().overlay && (
+        <Slider label="Size on desktop" min={0.2} max={0.9} step={0.05} value={p.overlayScale} onChange={(overlayScale) => setP({ overlayScale })} format={(x) => `${Math.round(x * 100)}% of screen height`} />
+      )}
+    </div>
+  );
+}
+
+// ───────────────────────── Voice & behaviour ─────────────────────────
+
+function VoiceBehaviourTab({ c, patch }: TabProps) {
+  const tts = useStore((s) => s.settings.ttsEndpoints);
+  const notify = useStore((s) => s.notify);
+  const [voices, setVoices] = useState<{ id: string; name: string }[]>([]);
+  const v = c.voice;
+  const b = c.behaviour;
+  const setV = (nv: Partial<typeof v>) => patch((x) => ({ ...x, voice: { ...x.voice, ...nv } }));
+  const set = (nb: Partial<typeof b>) => patch((x) => ({ ...x, behaviour: { ...x.behaviour, ...nb } }));
+  const endpoint = tts.find((t) => t.id === v.ttsEndpointId);
+  const name = c.character.nickname || c.character.name;
+
+  useEffect(() => {
+    if (!endpoint) return setVoices([]);
+    void createTTS(endpoint, platform().fetch).listVoices().then(setVoices).catch(() => setVoices([]));
+  }, [endpoint]);
 
   const testVoice = async () => {
     if (!endpoint) return;
     try {
-      const res = await createTTS(endpoint, platform().fetch).synthesize({ text: `Hi, I'm ${c.character.nickname || c.character.name}.`, voice: v.voiceId, speed: v.speed });
+      const res = await createTTS(endpoint, platform().fetch).synthesize({ text: `Hi, I'm ${name}.`, voice: v.voiceId, speed: v.speed });
       if (res.audio) {
         const { playAudio } = await import("../state/audio");
         playAudio(res.audio, (amp) => updateLive(c.id, { amplitude: amp }));
@@ -497,38 +637,6 @@ function LookTab({ c, patch }: TabProps) {
 
   return (
     <div className="form">
-      <h3>Call window</h3>
-      <div className="grid-3">
-        <Select label="Frame" value={p.frame} onChange={(frame) => setP({ frame })} options={[
-          { value: "circle", label: "Circle" }, { value: "rounded", label: "Rounded rectangle" }, { value: "rectangle", label: "Rectangle" },
-        ]} />
-        <Select label="Dialogue display" value={p.textStyle} onChange={(textStyle) => setP({ textStyle })} options={[
-          { value: "bubble", label: "Speech bubble" }, { value: "popup", label: "Pop-up card" }, { value: "subtitle", label: "Subtitles" },
-        ]} />
-        <Select label="Appears as" value={p.mode} onChange={(mode) => setP({ mode })} options={[
-          { value: "call", label: "Video-call window" },
-          ...(platform().overlay ? [{ value: "overlay" as const, label: "Full body on the desktop" }] : []),
-        ]} hint={platform().overlay ? undefined : "Desktop overlay is available on Windows and Linux"} />
-      </div>
-      <div className="grid-2">
-        <div className="field">
-          <label>Background</label>
-          <div className="row">
-            <input type="color" aria-label="Background colour" value={p.background.type === "color" ? p.background.color : "#1d2433"} onChange={(e) => setP({ background: { type: "color", color: e.target.value } })} />
-            <button className="btn btn-quiet" onClick={pickBackground}>Use an image</button>
-            {p.background.type === "image" && (
-              <select aria-label="Image fit" value={p.background.fit} onChange={(e) => setP({ background: { ...(p.background as { type: "image"; image: { path: string; mime: string }; fit: "cover" }), fit: e.target.value as "cover" | "contain" } })}>
-                <option value="cover">Fill</option>
-                <option value="contain">Fit</option>
-              </select>
-            )}
-          </div>
-        </div>
-        {platform().overlay && (
-          <Slider label="Size on desktop" min={0.2} max={0.9} step={0.05} value={p.overlayScale} onChange={(overlayScale) => setP({ overlayScale })} format={(x) => `${Math.round(x * 100)}% of screen height`} />
-        )}
-      </div>
-
       <h3>Voice</h3>
       <Select
         label="Voice engine"
@@ -551,17 +659,14 @@ function LookTab({ c, patch }: TabProps) {
           <button className="btn" onClick={testVoice}>Play a sample</button>
         </>
       )}
-    </div>
-  );
-}
 
-// ───────────────────────── Behaviour ─────────────────────────
-
-function BehaviourTab({ c, patch }: TabProps) {
-  const b = c.behaviour;
-  const set = (nb: Partial<typeof b>) => patch((x) => ({ ...x, behaviour: { ...x.behaviour, ...nb } }));
-  return (
-    <div className="form">
+      <h3>Behaviour</h3>
+      <Toggle
+        label="Greets you in their own words"
+        checked={b.spontaneousGreeting !== false}
+        onChange={(spontaneousGreeting) => set({ spontaneousGreeting })}
+        hint={`In Chat and Call, ${name} opens with a greeting of their own that reflects how well they know your persona, instead of the card's first message. Roleplay always uses the first message.`}
+      />
       <div className="fourth-wall" data-on={b.fourthWallAware || undefined}>
         <Toggle
           label="Fourth Wall Awareness"

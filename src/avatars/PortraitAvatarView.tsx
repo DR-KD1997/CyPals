@@ -5,9 +5,10 @@
  * flaps; actions without an image play a small motion on the portrait.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { Companion, PortraitAvatar } from "../core/types";
+import { DEFAULT_FRAMING, type Companion, type PortraitAvatar } from "../core/types";
 import { live, subscribeLive } from "../state/live";
 import { assetUrl } from "../state/assets";
+import { canonicalExpression, findExpressionKey } from "../core/synonyms";
 
 interface Props {
   companion: Companion;
@@ -84,7 +85,12 @@ export function PortraitAvatarView({ companion, avatar, framing, reduceMotion }:
       const list = urls[k];
       return list?.length ? list[variant % list.length] : "";
     };
-    const base = urls[key]?.length ? key : urls[avatar.fallback]?.length ? avatar.fallback : Object.keys(urls)[0];
+    // Keys may be synonyms ("sadness", "Surprise"): resolve the expression to whichever key the set uses.
+    const resolved = urls[key]?.length ? key : (() => {
+      const e = canonicalExpression(key);
+      return e ? findExpressionKey(Object.fromEntries(Object.entries(urls).filter(([, v]) => v.length)), e) : null;
+    })();
+    const base = resolved ?? (urls[avatar.fallback]?.length ? avatar.fallback : Object.keys(urls).find((k) => urls[k].length));
     if (!base) return "";
     if (talking && urls[`${base}${avatar.talkingSuffix}`]?.length) return pickFrom(`${base}${avatar.talkingSuffix}`);
     return pickFrom(base);
@@ -105,10 +111,13 @@ export function PortraitAvatarView({ companion, avatar, framing, reduceMotion }:
     return <div className="avatar-canvas portrait-empty">{companion.character.name.slice(0, 1)}</div>;
   }
   const fade = { transition: `opacity ${avatar.transitionMs}ms ease` };
+  const f = framing === "call" ? avatar.framing ?? DEFAULT_FRAMING : DEFAULT_FRAMING;
   return (
     <div className={`avatar-canvas portrait portrait-${framing}`} data-motion={motion ?? undefined}>
-      {layers.a && <img src={layers.a} alt="" style={{ ...fade, opacity: layers.showB ? 0 : 1 }} draggable={false} />}
-      {layers.b && <img src={layers.b} alt="" style={{ ...fade, opacity: layers.showB ? 1 : 0 }} draggable={false} />}
+      <div className="portrait-frame" style={{ transform: `translate(${f.x * 100}%, ${f.y * 100}%) scale(${f.zoom})` }}>
+        {layers.a && <img src={layers.a} alt="" style={{ ...fade, opacity: layers.showB ? 0 : 1 }} draggable={false} />}
+        {layers.b && <img src={layers.b} alt="" style={{ ...fade, opacity: layers.showB ? 1 : 0 }} draggable={false} />}
+      </div>
     </div>
   );
 }

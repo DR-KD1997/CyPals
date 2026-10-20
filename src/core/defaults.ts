@@ -43,11 +43,13 @@ export function defaultCompanion(name = "New Companion"): Companion {
     lorebookIds: [],
     embeddedLorebook: null,
     llmProfileId: null,
+    preferredPersonaId: null,
     behaviour: {
       fourthWallAware: false,
       fourthWallFrequency: 0.15,
       autonomousChat: true,
       idleChatterSeconds: 0,
+      spontaneousGreeting: true,
     },
     source: { kind: "created" },
   };

@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { watchTheme } from "./theme";
 import { useStore, type View } from "../state/store";
 import { runtime } from "../state/runtime";
 import { StageView } from "./StageView";
@@ -9,7 +10,7 @@ import { SettingsView } from "./SettingsView";
 import { Icon } from "./controls";
 
 const NAV: { view: View; label: string; icon: Parameters<typeof Icon>[0]["name"] }[] = [
-  { view: "stage", label: "Call", icon: "call" },
+  { view: "stage", label: "Talk", icon: "chat" },
   { view: "companions", label: "Companions", icon: "people" },
   { view: "lorebooks", label: "Lorebooks", icon: "book" },
   { view: "settings", label: "Settings", icon: "gear" },
@@ -21,6 +22,9 @@ export function App() {
   const setView = useStore((s) => s.setView);
   const toast = useStore((s) => s.toast);
   const reduceMotion = useStore((s) => s.settings.reduceMotion);
+
+  const appearance = useStore((s) => s.settings.appearance);
+  useEffect(() => watchTheme(() => appearance), [appearance]);
 
   useEffect(() => {
     if (ready) runtime.start();

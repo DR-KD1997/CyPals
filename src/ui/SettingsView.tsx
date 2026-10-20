@@ -4,28 +4,34 @@ import { PROVIDER_PRESETS, type LLMProfile } from "../core/llm/types";
 import { createProvider, profileFromPreset } from "../core/llm/providers";
 import { TTS_PRESETS, type TTSEndpoint } from "../core/tts/providers";
 import { decideWindow, type WindowInfo } from "../core/vision/policy";
-import { DEFAULT_MAIN_PROMPT } from "../core/llm/prompt";
+import { CALL_MODE_PROMPT, CHAT_MODE_PROMPT, DEFAULT_MAIN_PROMPT } from "../core/llm/prompt";
+import { STT_PRESETS, type STTSettings } from "../core/stt/providers";
+import { newPersona } from "../core/personas";
+import type { Persona } from "../core/types";
+import { TINT_PRESETS } from "./theme";
 import { platform } from "../platform";
 import { listCameras } from "../state/webcam";
 import { uid } from "../core/util";
 import { Icon, NumberInput, Select, Slider, Tabs, TagInput, TextArea, TextInput, Toggle } from "./controls";
 
-type Section = "you" | "models" | "voices" | "vision" | "conversation";
+type Section = "persona" | "appearance" | "models" | "voices" | "vision" | "conversation";
 
 export function SettingsView() {
-  const [section, setSection] = useState<Section>("you");
+  const [section, setSection] = useState<Section>("persona");
   return (
     <section className="page">
       <header className="page-head"><h1>Settings</h1></header>
       <Tabs<Section> value={section} onChange={setSection} tabs={[
-        { id: "you", label: "You" },
+        { id: "persona", label: "Persona" },
+        { id: "appearance", label: "Appearance" },
         { id: "models", label: "Models" },
         { id: "voices", label: "Voices" },
         { id: "vision", label: "Vision & privacy" },
         { id: "conversation", label: "Conversation" },
       ]} />
       <div className="tab-panel" role="tabpanel">
-        {section === "you" && <YouSection />}
+        {section === "persona" && <PersonaSection />}
+        {section === "appearance" && <AppearanceSection />}
         {section === "models" && <ModelsSection />}
         {section === "voices" && <VoicesSection />}
         {section === "vision" && <VisionSection />}
@@ -35,13 +41,108 @@ export function SettingsView() {
   );
 }
 
-function YouSection() {
+function PersonaSection() {
   const s = useStore((x) => x.settings);
+  const companions = useStore((x) => x.companions);
   const update = useStore((x) => x.updateSettings);
+  const [openId, setOpenId] = useState<string>(s.defaultPersonaId);
+  const setPersona = (id: string, p: Partial<Persona>) => update({ personas: s.personas.map((x) => (x.id === id ? { ...x, ...p } : x)) });
+  const users = (id: string) => Object.values(companions).filter((c) => c.preferredPersonaId === id).map((c) => c.character.name);
   return (
     <div className="form">
-      <TextInput label="Your name" value={s.persona.name} onChange={(name) => update({ persona: { ...s.persona, name } })} hint="Companions call you this ({{user}} in cards)" />
-      <TextArea label="About you" rows={4} value={s.persona.description} onChange={(description) => update({ persona: { ...s.persona, description } })} hint="Optional. Shared with every companion so they know who they're talking to." />
+      <p className="hint">
+        Personas are the roles you play. Companions see the persona's name as {"{{user}}"} and read its description. Pick a default here, and a preferred
+        persona for any companion in its Character tab. During a chat you can switch from the top of the screen.
+      </p>
+      <ul className="plain profiles">
+        {s.personas.map((p) => {
+          const isDefault = s.defaultPersonaId === p.id;
+          const pref = users(p.id);
+          return (
+            <li key={p.id} className="profile" data-open={openId === p.id || undefined}>
+              <button className="profile-head" onClick={() => setOpenId(openId === p.id ? "" : p.id)} aria-expanded={openId === p.id}>
+                <span>{p.name || "Unnamed persona"}</span>
+                <small>{[isDefault ? "Default" : "", pref.length ? `Preferred by ${pref.join(", ")}` : ""].filter(Boolean).join(" · ")}</small>
+              </button>
+              {openId === p.id && (
+                <div className="profile-body">
+                  <TextInput label="Name" value={p.name} onChange={(name) => setPersona(p.id, { name })} hint="What companions call you in this role" />
+                  <TextArea label="Description" rows={5} value={p.description} onChange={(description) => setPersona(p.id, { description })} placeholder="Who you are in this role: appearance, personality, background, relationship to the characters…" />
+                  <div className="row">
+                    <button className="btn" disabled={isDefault} onClick={() => update({ defaultPersonaId: p.id })}>{isDefault ? "Default persona" : "Make default"}</button>
+                    <span className="spacer" />
+                    <button
+                      className="btn btn-quiet danger"
+                      disabled={s.personas.length === 1}
+                      onClick={() => {
+                        const rest = s.personas.filter((x) => x.id !== p.id);
+                        void update({ personas: rest, defaultPersonaId: isDefault ? rest[0].id : s.defaultPersonaId });
+                      }}
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+      <div>
+        <button
+          className="btn"
+          onClick={() => {
+            const p = newPersona("New persona");
+            void update({ personas: [...s.personas, p] });
+            setOpenId(p.id);
+          }}
+        >
+          <Icon name="plus" size={16} /> Add persona
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function AppearanceSection() {
+  const s = useStore((x) => x.settings);
+  const update = useStore((x) => x.updateSettings);
+  const a = s.appearance;
+  const set = (p: Partial<typeof a>) => update({ appearance: { ...a, ...p } });
+  return (
+    <div className="form">
+      <div className="field">
+        <label id="theme-label">Theme</label>
+        <div className="mode-switch" role="radiogroup" aria-labelledby="theme-label">
+          {(["dark", "light", "system"] as const).map((t) => (
+            <button key={t} role="radio" aria-checked={a.theme === t} onClick={() => set({ theme: t })}>
+              {t === "dark" ? "Dark" : t === "light" ? "Light" : "Match system"}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="field">
+        <label id="tint-label">Colour tint</label>
+        <div className="tints" role="radiogroup" aria-labelledby="tint-label">
+          {TINT_PRESETS.map((t) => (
+            <button
+              key={t.color}
+              role="radio"
+              aria-checked={a.tint.toLowerCase() === t.color}
+              className="tint"
+              style={{ ["--swatch" as string]: t.color }}
+              onClick={() => set({ tint: t.color })}
+              title={t.name}
+            >
+              <span className="sr-only">{t.name}</span>
+            </button>
+          ))}
+          <label className="tint tint-custom" title="Custom colour">
+            <input type="color" value={a.tint} onChange={(e) => set({ tint: e.target.value })} aria-label="Custom tint colour" />
+          </label>
+        </div>
+      </div>
+      <Slider label="Tint strength" min={0} max={1} step={0.05} value={a.tintStrength} onChange={(tintStrength) => set({ tintStrength })} format={(v) => (v < 0.1 ? "Neutral" : v < 0.45 ? "Subtle" : v < 0.8 ? "Tinted" : "Strong")} hint="How much of the tint the backgrounds take on. The accent colour always uses it." />
       <Toggle label="Reduce motion" checked={s.reduceMotion} onChange={(reduceMotion) => update({ reduceMotion })} hint="Stops idle sway, blinking and gestures; avatars still change expression." />
     </div>
   );
@@ -209,7 +310,49 @@ function VoicesSection() {
         }}
         options={[{ value: "", label: "Choose an engine…" }, ...TTS_PRESETS.map((p, i) => ({ value: String(i), label: p.label }))]}
       />
+      <SpeechToText />
     </div>
+  );
+}
+
+function SpeechToText() {
+  const s = useStore((x) => x.settings);
+  const update = useStore((x) => x.updateSettings);
+  const setApiKey = useStore((x) => x.setApiKey);
+  const stt = s.stt;
+  const set = (p: Partial<STTSettings>) => stt && update({ stt: { ...stt, ...p } });
+  const hasGemini = s.llmProfiles.some((p) => p.kind === "gemini" && p.apiKey);
+  return (
+    <>
+      <h3>Speech-to-text</h3>
+      <p className="hint">Turns your voice notes and Call-mode speech into text for the companions. Recordings are sent only to this service.</p>
+      <Select
+        label="Engine"
+        value={stt ? String(STT_PRESETS.findIndex((p) => p.label === stt.label)) : ""}
+        onChange={(v) => {
+          const preset = STT_PRESETS[Number(v)];
+          void update({ stt: v === "" || !preset ? null : { ...structuredClone(preset), apiKey: "" } });
+          if (preset) void setApiKey("stt", "");
+        }}
+        options={[{ value: "", label: "Off" }, ...STT_PRESETS.map((p, i) => ({ value: String(i), label: p.label }))]}
+      />
+      {stt && (
+        <div className="grid-2">
+          <TextInput label="Server address" value={stt.baseUrl} onChange={(baseUrl) => set({ baseUrl })} />
+          <TextInput label="Model" value={stt.model} onChange={(model) => set({ model })} />
+          {!stt.baseUrl.includes("127.0.0.1") && !stt.baseUrl.includes("localhost") && (
+            <TextInput
+              label="API key"
+              type="password"
+              value={stt.apiKey}
+              onChange={(k) => void setApiKey("stt", k)}
+              hint={stt.kind === "gemini" && hasGemini ? "Leave empty to use the key from your Gemini model connection." : undefined}
+            />
+          )}
+          <TextInput label="Language" value={stt.language} placeholder="Auto-detect" onChange={(language) => set({ language: language.trim().toLowerCase() })} hint="Two-letter code such as en, de, ja; empty = detect" />
+        </div>
+      )}
+    </>
   );
 }
 
@@ -308,7 +451,19 @@ function ConversationSection() {
       <h3>Prompting</h3>
       <Toggle label="Expression and gesture tags" checked={o.performanceTags} onChange={(performanceTags) => set({ performanceTags })} hint="Asks the model to mark expressions and gestures. Turn off for small models that echo the tags; faces are then guessed from the text." />
       <Toggle label="Tell fourth-wall-aware characters which model they run on" checked={s.shareModelNameWithCharacters} onChange={(shareModelNameWithCharacters) => update({ shareModelNameWithCharacters })} />
-      <TextArea label="Main prompt" rows={5} value={o.mainPrompt} placeholder={DEFAULT_MAIN_PROMPT} onChange={(mainPrompt) => set({ mainPrompt })} hint="Leave empty to use the default shown." />
+      <TextArea label="Roleplay prompt" rows={4} value={o.mainPrompt} placeholder={DEFAULT_MAIN_PROMPT} onChange={(mainPrompt) => set({ mainPrompt })} hint="Leave empty to use the default shown. A card's own system prompt replaces this in Roleplay." />
+      <TextArea label="Chat prompt" rows={4} value={o.chatPrompt ?? ""} placeholder={CHAT_MODE_PROMPT} onChange={(chatPrompt) => set({ chatPrompt })} />
+      <TextArea label="Call prompt" rows={4} value={o.callPrompt ?? ""} placeholder={CALL_MODE_PROMPT} onChange={(callPrompt) => set({ callPrompt })} />
+      <h3>Calls</h3>
+      <Slider
+        label="Silence before they answer"
+        min={3} max={8} step={0.5}
+        value={s.call.silenceSeconds}
+        onChange={(silenceSeconds) => update({ call: { ...s.call, silenceSeconds: Math.max(3, silenceSeconds) } })}
+        format={(v) => `${v} s`}
+        hint="How long you need to stay quiet after speaking before it's the character's turn. At least 3 seconds."
+      />
+      <Toggle label="Listen as soon as a call opens" checked={s.call.autoListen} onChange={(autoListen) => update({ call: { ...s.call, autoListen } })} hint="Otherwise, press Start listening in the call." />
     </div>
   );
 }

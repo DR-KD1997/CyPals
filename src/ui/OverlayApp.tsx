@@ -6,6 +6,7 @@
  * which can be dragged sideways.
  */
 import { useEffect, useRef, useState } from "react";
+import { watchTheme } from "./theme";
 import { useStore } from "../state/store";
 import { platform } from "../platform";
 import { applySnapshot, live, type LiveState } from "../state/live";
@@ -39,6 +40,9 @@ export function OverlayApp() {
       clearTimeout(pending);
     };
   }, []);
+
+  const appearance = useStore((s) => s.settings.appearance);
+  useEffect(() => watchTheme(() => appearance), [appearance]);
 
   useEffect(() => {
     document.documentElement.classList.add("overlay-root");

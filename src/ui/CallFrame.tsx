@@ -44,12 +44,29 @@ export function renderNarration(text: string) {
   );
 }
 
-export function CallFrame({ companion, size }: { companion: Companion; size: "lg" | "md" | "sm" }) {
+/** Colour or image background of a companion's call window. */
+export function useCallWindowStyle(companion: Companion): CSSProperties {
+  const [bg, setBg] = useState<string | null>(null);
+  const b = companion.presentation.background;
+  const key = b.type === "image" ? b.image.path : "";
+  useEffect(() => {
+    if (key) void assetUrl(companion.id, key).then(setBg);
+    else setBg(null);
+  }, [companion.id, key]);
+  return {
+    background: b.type === "color" ? b.color : undefined,
+    backgroundImage: bg ? `url("${bg}")` : undefined,
+    backgroundSize: b.type === "image" ? b.fit : undefined,
+    backgroundPosition: "center",
+  };
+}
+
+export function CallFrame({ companion, size, showBubble = true }: { companion: Companion; size: "lg" | "md" | "sm"; showBubble?: boolean }) {
   const ring = useRef<HTMLDivElement>(null);
   const st = useLive(companion.id);
   const saveCompanion = useStore((s) => s.saveCompanion);
   const reduceMotion = useStore((s) => s.settings.reduceMotion);
-  const [bg, setBg] = useState<string | null>(null);
+  const style = useCallWindowStyle(companion);
   const p = companion.presentation;
 
   // Voice-reactive ring: scale & glow follow amplitude every frame without React renders.
@@ -63,16 +80,6 @@ export function CallFrame({ companion, size }: { companion: Companion; size: "lg
     return () => cancelAnimationFrame(raf);
   }, [companion.id]);
 
-  useEffect(() => {
-    if (p.background.type === "image") void assetUrl(companion.id, p.background.image.path).then(setBg);
-    else setBg(null);
-  }, [companion.id, p.background]);
-
-  const style: CSSProperties = {
-    background: p.background.type === "color" ? p.background.color : undefined,
-    backgroundImage: bg ? `url("${bg}")` : undefined,
-    backgroundSize: p.background.type === "image" ? p.background.fit : undefined,
-  };
 
   const switchAvatar = () => {
     const i = companion.avatars.findIndex((a) => a.id === companion.activeAvatarId);
@@ -88,7 +95,7 @@ export function CallFrame({ companion, size }: { companion: Companion; size: "lg
   const name = companion.character.nickname || companion.character.name;
   return (
     <figure className={`call call-${size}`} data-speaking={st.speaking || undefined}>
-      {p.textStyle === "bubble" && <SpeechBubble companion={companion} style="bubble" />}
+      {showBubble && p.textStyle === "bubble" && <SpeechBubble companion={companion} style="bubble" />}
       <div ref={ring} className={`call-ring frame-${p.frame}`}>
         <div className={`call-window frame-${p.frame}`} style={style}>
           <AvatarView companion={companion} framing="call" reduceMotion={reduceMotion} />
