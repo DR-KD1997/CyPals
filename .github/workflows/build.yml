@@ -54,7 +54,10 @@ jobs:
       - run: npm ci
       - name: Rust tests
         if: matrix.name == 'linux'
-        run: scripts/ci-run.sh cargo-test cargo test --manifest-path src-tauri/Cargo.toml
+        # The Tauri crate embeds the built frontend, so dist/ must exist before compiling.
+        run: |
+          scripts/ci-run.sh frontend-build npm run build
+          scripts/ci-run.sh cargo-test cargo test --manifest-path src-tauri/Cargo.toml
       - run: scripts/ci-run.sh tauri-build npx tauri build --bundles ${{ matrix.bundles }}
         shell: bash
       - uses: actions/upload-artifact@v4
