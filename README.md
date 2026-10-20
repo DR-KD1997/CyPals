@@ -28,7 +28,8 @@ Runs on **Windows**, **Linux** and **Android** (Tauri 2 + React + three.js).
 
 Builds for Android (APK), Windows (installer `.exe` / `.msi`) and Linux (`.deb`, `.rpm`, AppImage) are made by
 GitHub Actions ([`.github/workflows/build.yml`](.github/workflows/build.yml)). Every push to `main` keeps them as
-workflow artifacts; pushing a tag such as `v0.1.0` publishes them on the Releases page.
+workflow artifacts. When `main` reaches a new `version` in `package.json` (keep it in step with
+`src-tauri/tauri.conf.json` and `src-tauri/Cargo.toml`), the build is published on the Releases page as `v<version>`.
 Linux packages are built on Ubuntu 24.04, so they need a 2024-or-newer distribution (Ubuntu 24.04+, Debian 13+, Fedora 40+).
 
 The Android APK is signed with the key in the `ANDROID_KEYSTORE_B64`, `ANDROID_KEYSTORE_PASSWORD` and

@@ -2,7 +2,8 @@ name: Build
 
 # Builds CyPals for Android, Windows and Linux on GitHub's machines.
 # - Every push to main / manual run: builds everything and keeps the files as workflow artifacts.
-# - Pushing a tag like v0.1.0: also publishes them as a GitHub Release.
+# - When main reaches a version (package.json "version") that has no release yet,
+#   or a tag like v0.1.0 is pushed: also publishes them as a GitHub Release.
 on:
   push:
     branches: [main]
@@ -18,8 +19,21 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-22.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      release_needed: ${{ steps.version.outputs.release_needed }}
     steps:
       - uses: actions/checkout@v4
+      - name: Read version
+        id: version
+        run: |
+          V=$(node -p "require('./package.json').version")
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          if git ls-remote --exit-code --tags origin "refs/tags/v$V" > /dev/null; then
+            echo "release_needed=false" >> "$GITHUB_OUTPUT"; echo "v$V is already released"
+          else
+            echo "release_needed=true" >> "$GITHUB_OUTPUT"; echo "v$V has no release yet"
+          fi
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: npm }
       - run: npm ci
@@ -77,6 +91,7 @@ jobs:
     needs: test
     runs-on: ubuntu-22.04
     env:
+      VERSION: ${{ needs.test.outputs.version }}
       NDK_VERSION: 27.2.12479018
       BUILD_TOOLS: 35.0.0
     steps:
@@ -127,7 +142,7 @@ jobs:
           "$BT/zipalign" -f -p 4 "$UNSIGNED" out/aligned.apk
           "$BT/apksigner" sign --ks release.jks --ks-key-alias "$KEY_ALIAS" \
             --ks-pass "pass:$KEYSTORE_PASSWORD" --key-pass "pass:$KEYSTORE_PASSWORD" \
-            --out "out/CyPals_${GITHUB_REF_NAME//\//-}_android.apk" out/aligned.apk
+            --out "out/CyPals_${VERSION}_android.apk" out/aligned.apk
           "$BT/apksigner" verify --print-certs out/CyPals_*_android.apk | head -3
           rm -f out/aligned.apk release.jks
       - uses: actions/upload-artifact@v4
@@ -137,8 +152,10 @@ jobs:
           path: out/*.apk
 
   release:
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: [desktop, android]
+    if: >-
+      startsWith(github.ref, 'refs/tags/v') ||
+      (github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.test.outputs.release_needed == 'true')
+    needs: [test, desktop, android]
     runs-on: ubuntu-22.04
     permissions:
       contents: write
@@ -148,7 +165,9 @@ jobs:
       - run: find dist -type f | sort
       - uses: softprops/action-gh-release@v2
         with:
-          name: CyPals ${{ github.ref_name }}
+          tag_name: v${{ needs.test.outputs.version }}
+          target_commitish: ${{ github.sha }}
+          name: CyPals v${{ needs.test.outputs.version }}
           prerelease: true
           generate_release_notes: true
           files: dist/**/*
