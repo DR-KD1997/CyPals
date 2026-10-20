@@ -12,7 +12,8 @@ on:
 
 concurrency:
   group: build-${{ github.ref }}
-  cancel-in-progress: true
+  # Queue new runs instead of cancelling one that is already building.
+  cancel-in-progress: false
 
 jobs:
   test:
@@ -31,7 +32,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-22.04
+          # 24.04: xcap's PipeWire bindings need a newer libpipewire than 22.04 ships.
+          - os: ubuntu-24.04
             name: linux
             bundles: deb,rpm,appimage
           - os: windows-latest
