@@ -58,7 +58,9 @@ export function ModelAvatarView({ companion, avatar, framing, reduceMotion, back
   framingRef.current = avatar.framing ?? DEFAULT_FRAMING;
   const reframe = useRef<() => void>(() => {});
   const framingKey = JSON.stringify(framingRef.current);
-  useEffect(() => reframe.current(), [framingKey]);
+  useEffect(() => {
+    reframe.current();
+  }, [framingKey]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {

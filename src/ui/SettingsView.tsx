@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useStore } from "../state/store";
 import { PROVIDER_PRESETS, type LLMProfile } from "../core/llm/types";
 import { createProvider, profileFromPreset } from "../core/llm/providers";
+import { ModelPicker } from "./ModelPicker";
 import { TTS_PRESETS, type TTSEndpoint } from "../core/tts/providers";
 import { decideWindow, type WindowInfo } from "../core/vision/policy";
 import { CALL_MODE_PROMPT, CHAT_MODE_PROMPT, DEFAULT_MAIN_PROMPT } from "../core/llm/prompt";
@@ -183,20 +184,12 @@ function ProfileEditor({ profile }: { profile: LLMProfile }) {
   const update = useStore((x) => x.updateSettings);
   const setApiKey = useStore((x) => x.setApiKey);
   const notify = useStore((x) => x.notify);
-  const [models, setModels] = useState<string[]>([]);
   const [testing, setTesting] = useState(false);
   const preset = PROVIDER_PRESETS.find((p) => p.id === profile.presetId);
   const set = (p: Partial<LLMProfile>) => update({ llmProfiles: s.llmProfiles.map((x) => (x.id === profile.id ? { ...x, ...p } : x)) });
   const sp = profile.sampling;
   const setS = (p: Partial<typeof sp>) => set({ sampling: { ...sp, ...p } });
 
-  const fetchModels = async () => {
-    try {
-      setModels(await createProvider(profile, platform().fetch).listModels());
-    } catch (e) {
-      notify("error", (e as Error).message);
-    }
-  };
   const test = async () => {
     setTesting(true);
     try {
@@ -222,14 +215,18 @@ function ProfileEditor({ profile }: { profile: LLMProfile }) {
         <TextInput label="API key" type="password" value={profile.apiKey} onChange={(k) => void setApiKey(profile.id, k)} />
       )}
       <div className="grid-2">
-        <div className="field">
-          <label htmlFor={`m-${profile.id}`}>Model</label>
-          <div className="row">
-            <input id={`m-${profile.id}`} list={`ml-${profile.id}`} value={profile.model} onChange={(e) => set({ model: e.target.value })} />
-            <datalist id={`ml-${profile.id}`}>{models.map((m) => <option key={m} value={m} />)}</datalist>
-            <button className="btn btn-quiet" onClick={fetchModels}>List models</button>
-          </div>
-        </div>
+        <ModelPicker
+          profile={profile}
+          onType={(model) => set({ model })}
+          onPick={(m) =>
+            set({
+              model: m.id,
+              // Use what the provider reports: image support, and a context size the model can actually hold.
+              ...(m.vision !== undefined ? { vision: m.vision } : {}),
+              ...(m.contextLength && profile.contextTokens > m.contextLength ? { contextTokens: m.contextLength } : {}),
+            })
+          }
+        />
         <NumberInput label="Context size (tokens)" step={1024} value={profile.contextTokens} onChange={(contextTokens) => set({ contextTokens })} />
       </div>
       <Toggle label="Model accepts images" checked={profile.vision} onChange={(vision) => set({ vision })} hint="Needed for screen and webcam sharing. Images are dropped for models without vision." />

@@ -102,7 +102,19 @@ export interface GenerateResult {
 export interface LLMProvider {
   readonly profile: LLMProfile;
   generate(req: GenerateRequest): Promise<GenerateResult>;
-  listModels(): Promise<string[]>;
+  listModels(): Promise<ModelInfo[]>;
+}
+
+/** One entry from a provider's model list. Only `id` is guaranteed. */
+export interface ModelInfo {
+  id: string;
+  /** Human-readable name, when the provider gives one. */
+  name?: string;
+  contextLength?: number;
+  /** Accepts image input (OpenRouter and Gemini report this). */
+  vision?: boolean;
+  /** Free to use (OpenRouter `:free` models / zero pricing). */
+  free?: boolean;
 }
 
 export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;

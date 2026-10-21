@@ -10,7 +10,7 @@
  * `fetchImpl` is injected: the desktop/Android app passes Tauri's HTTP plugin
  * (no CORS, can reach localhost from the webview), tests pass a fake.
  */
-import type { FetchLike, GenerateRequest, GenerateResult, LLMProfile, LLMProvider, PromptMessage } from "./types";
+import type { FetchLike, GenerateRequest, GenerateResult, LLMProfile, LLMProvider, ModelInfo, PromptMessage } from "./types";
 import { DEFAULT_SAMPLING, PROVIDER_PRESETS } from "./types";
 import { uid } from "../util";
 
@@ -181,12 +181,12 @@ export class OpenAICompatibleProvider implements LLMProvider {
     return { text, finishReason, usage };
   }
 
-  async listModels(): Promise<string[]> {
+  async listModels(): Promise<ModelInfo[]> {
     const res = await this.fetchImpl(`${trimSlash(this.profile.baseUrl)}/models`, { headers: this.headers() });
     await ensureOk(res, this.profile.label);
     const j = await res.json();
-    const list = Array.isArray(j.data) ? j.data : Array.isArray(j.models) ? j.models : [];
-    return list.map((m: any) => String(m.id ?? m.name ?? m)).sort();
+    const list: unknown[] = Array.isArray(j) ? j : Array.isArray(j.data) ? j.data : Array.isArray(j.models) ? j.models : [];
+    return sortModels(list.map(parseOpenAIModel).filter((m): m is ModelInfo => !!m));
   }
 }
 
@@ -252,16 +252,28 @@ export class GeminiProvider implements LLMProvider {
     return { text, finishReason };
   }
 
-  async listModels(): Promise<string[]> {
-    const res = await this.fetchImpl(`${trimSlash(this.profile.baseUrl)}/models?pageSize=200`, {
-      headers: { "x-goog-api-key": this.profile.apiKey },
-    });
-    await ensureOk(res, "Gemini");
-    const j = await res.json();
-    return (j.models ?? [])
-      .filter((m: any) => (m.supportedGenerationMethods ?? []).includes("generateContent"))
-      .map((m: any) => String(m.name).replace(/^models\//, ""))
-      .sort();
+  async listModels(): Promise<ModelInfo[]> {
+    const out: ModelInfo[] = [];
+    let page = "";
+    for (let i = 0; i < 20; i++) {
+      const res = await this.fetchImpl(`${trimSlash(this.profile.baseUrl)}/models?pageSize=1000${page ? `&pageToken=${encodeURIComponent(page)}` : ""}`, {
+        headers: { "x-goog-api-key": this.profile.apiKey },
+      });
+      await ensureOk(res, "Gemini");
+      const j = await res.json();
+      for (const m of j.models ?? []) {
+        if (!(m.supportedGenerationMethods ?? []).includes("generateContent")) continue;
+        out.push({
+          id: String(m.name).replace(/^models\//, ""),
+          name: typeof m.displayName === "string" ? m.displayName : undefined,
+          contextLength: Number(m.inputTokenLimit) || undefined,
+          vision: true,
+        });
+      }
+      page = j.nextPageToken ?? "";
+      if (!page) break;
+    }
+    return sortModels(out);
   }
 }
 
@@ -328,13 +340,20 @@ export class AnthropicProvider implements LLMProvider {
     return { text, finishReason };
   }
 
-  async listModels(): Promise<string[]> {
-    const res = await this.fetchImpl(`${trimSlash(this.profile.baseUrl)}/models`, {
-      headers: { "x-api-key": this.profile.apiKey, "anthropic-version": "2023-06-01" },
-    });
-    await ensureOk(res, "Anthropic");
-    const j = await res.json();
-    return (j.data ?? []).map((m: any) => String(m.id)).sort();
+  async listModels(): Promise<ModelInfo[]> {
+    const out: ModelInfo[] = [];
+    let after = "";
+    for (let i = 0; i < 20; i++) {
+      const res = await this.fetchImpl(`${trimSlash(this.profile.baseUrl)}/models?limit=1000${after ? `&after_id=${encodeURIComponent(after)}` : ""}`, {
+        headers: { "x-api-key": this.profile.apiKey, "anthropic-version": "2023-06-01" },
+      });
+      await ensureOk(res, "Anthropic");
+      const j = await res.json();
+      for (const m of j.data ?? []) out.push({ id: String(m.id), name: typeof m.display_name === "string" ? m.display_name : undefined, vision: true });
+      if (!j.has_more || !j.last_id) break;
+      after = String(j.last_id);
+    }
+    return sortModels(out);
   }
 }
 
@@ -368,4 +387,33 @@ export function profileFromPreset(presetId: string, overrides: Partial<LLMProfil
 
 function trimSlash(s: string): string {
   return s.replace(/\/+$/, "");
+}
+
+// ─────────────────────────── Model lists ───────────────────────────
+
+/**
+ * Reads one entry of an OpenAI-style `/models` list. OpenRouter adds `name`,
+ * `context_length`, `architecture.input_modalities` and `pricing`; Groq adds
+ * `context_window`; local servers often give only `id` (or `name`).
+ */
+export function parseOpenAIModel(m: unknown): ModelInfo | null {
+  if (typeof m === "string") return m ? { id: m } : null;
+  if (!m || typeof m !== "object") return null;
+  const r = m as Record<string, any>;
+  const id = String(r.id ?? r.model ?? r.name ?? "");
+  if (!id) return null;
+  const name = typeof r.name === "string" && r.name !== id ? r.name : undefined;
+  const ctx = Number(r.context_length ?? r.context_window ?? r.top_provider?.context_length ?? r.max_context_length) || undefined;
+  const modalities: unknown = r.architecture?.input_modalities;
+  const vision = Array.isArray(modalities) ? modalities.includes("image") : typeof r.architecture?.modality === "string" ? /image/.test(String(r.architecture.modality).split("->")[0]) : undefined;
+  const p = r.pricing;
+  const free = id.endsWith(":free") || (p && Number(p.prompt) === 0 && Number(p.completion) === 0 && p.prompt !== undefined) ? true : undefined;
+  return { id, name, contextLength: ctx, vision, free };
+}
+
+/** Sorted by id, duplicates removed. */
+export function sortModels(list: ModelInfo[]): ModelInfo[] {
+  const seen = new Map<string, ModelInfo>();
+  for (const m of list) if (!seen.has(m.id)) seen.set(m.id, m);
+  return [...seen.values()].sort((a, b) => a.id.localeCompare(b.id));
 }

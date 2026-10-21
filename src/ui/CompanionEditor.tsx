@@ -11,7 +11,7 @@ import { Icon, NumberInput, Select, Slider, Tabs, TagInput, TextArea, TextInput,
 import { AvatarView } from "../avatars/AvatarView";
 import { useCallWindowStyle } from "./CallFrame";
 import { live, pushAction, updateLive } from "../state/live";
-import { canonicalExpression, portraitKeyFor } from "../core/synonyms";
+import { canonicalExpression, portraitKeyFromFile, portraitKeysFor } from "../core/synonyms";
 
 type Tab = "character" | "avatars" | "behaviour" | "lore";
 
@@ -218,7 +218,7 @@ function AvatarsTab({ c, patch }: TabProps) {
     });
     add({
       id: uid("av"), kind: "portraits", label: "Portraits", images,
-      fallback: images.neutral ? "neutral" : Object.keys(images)[0], transitionMs: 180, talkingSuffix: "_talk",
+      fallback: portraitKeysFor(images, "neutral")[0] ?? Object.keys(images)[0], transitionMs: 180, talkingSuffix: "_talk",
     });
   };
 
@@ -404,8 +404,9 @@ function Live2DSettings({ c, a, update }: { c: Companion; a: Live2DAvatar; updat
   );
 }
 
+/** Images keep their own names; "sadness.png" stays "sadness" and still shows for "sad". */
 function keyFromFilename(name: string): string {
-  return portraitKeyFor(name);
+  return portraitKeyFromFile(name);
 }
 
 function PortraitSettings({ c, a, update }: { c: Companion; a: PortraitAvatar; update(a: Avatar): void }) {
@@ -444,7 +445,8 @@ function PortraitSettings({ c, a, update }: { c: Companion; a: PortraitAvatar; u
     update({ ...a, images });
   };
 
-  const missing = EXPRESSIONS.filter((e) => !a.images[e]);
+  // An expression counts as covered by any image whose name means the same ("sadness" covers sad).
+  const missing = EXPRESSIONS.filter((e) => !portraitKeysFor(a.images, e, a.talkingSuffix).length);
   return (
     <>
       <p className="hint">Each image shows for the expression or action it's assigned to. Several images on one expression rotate for variety. An image keyed <code>happy{a.talkingSuffix}</code> alternates with <code>happy</code> while speaking.</p>

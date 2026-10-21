@@ -1,6 +1,6 @@
 [package]
 name = "cypals"
-version = "0.2.0"
+version = "0.2.1"
 description = "CyPals — AI companions with 3D, Live2D and portrait avatars"
 authors = ["Kaan"]
 license = "AGPL-3.0-or-later"

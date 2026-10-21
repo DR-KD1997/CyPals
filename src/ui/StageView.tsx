@@ -328,12 +328,16 @@ function StreamingStory({ c }: { c: Companion }) {
 /** Keep a list scrolled to its newest entry, including while replies stream in. */
 function useAutoScroll(count: number) {
   const end = useRef<HTMLLIElement>(null);
-  useEffect(() => end.current?.scrollIntoView({ block: "end" }), [count]);
+  useEffect(() => {
+    end.current?.scrollIntoView({ block: "end" });
+  }, [count]);
   useEffect(() => {
     let raf = 0;
     return subscribeAnyLive(() => {
       cancelAnimationFrame(raf);
-      raf = requestAnimationFrame(() => end.current?.scrollIntoView({ block: "end" }));
+      raf = requestAnimationFrame(() => {
+        end.current?.scrollIntoView({ block: "end" });
+      });
     });
   }, []);
   return end;
@@ -423,7 +427,9 @@ function Composer({ mode, present }: { mode: InteractionMode; present: Companion
 function TranscriptPanel({ onClose }: { onClose(): void }) {
   const session = useStore((s) => s.session);
   const end = useRef<HTMLDivElement>(null);
-  useEffect(() => end.current?.scrollIntoView({ block: "end" }), [session.messages.length]);
+  useEffect(() => {
+    end.current?.scrollIntoView({ block: "end" });
+  }, [session.messages.length]);
   return (
     <aside className="log" aria-label="Transcript">
       <header>

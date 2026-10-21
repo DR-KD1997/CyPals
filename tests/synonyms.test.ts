@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canonicalExpression, editDistance, findExpressionKey, portraitKeyFor } from "../src/core/synonyms";
+import { canonicalExpression, editDistance, findExpressionKey, portraitKeyFromFile, portraitKeysFor, talkingKeyFor } from "../src/core/synonyms";
 import { parsePerformance } from "../src/core/expressions";
 import { EXPRESSIONS } from "../src/core/types";
 
@@ -43,11 +43,23 @@ describe("expression synonyms", () => {
     for (const w of ["table", "wave", "hair", "body", "x", "", "eye_l"]) expect(canonicalExpression(w), w).toBeNull();
   });
 
-  it("builds portrait keys with talk frames and keeps actions", () => {
-    expect(portraitKeyFor("Sadness.png")).toBe("sad");
-    expect(portraitKeyFor("surprise_talk.png")).toBe("surprised_talk");
-    expect(portraitKeyFor("happy2.png")).toBe("happy");
-    expect(portraitKeyFor("wave.png")).toBe("wave");
+  it("keeps portrait file names exactly as given", () => {
+    expect(portraitKeyFromFile("Sadness.png")).toBe("Sadness");
+    expect(portraitKeyFromFile("C:\\packs\\pip/surprise_talk.webp")).toBe("surprise_talk");
+    expect(portraitKeyFromFile("happy2.png")).toBe("happy2");
+    expect(portraitKeyFromFile("sadness")).toBe("sadness");
+  });
+
+  it("finds every portrait that means an expression, without talking frames", () => {
+    const images = { sad: [1], Sadness: [2], sadness_talk: [3], happy: [4], empty_sad: [], wave: [5] };
+    expect(portraitKeysFor(images, "sad")).toEqual(["sad", "Sadness"]);
+    expect(portraitKeysFor({ sadness: [1] }, "sad")).toEqual(["sadness"]);
+    expect(portraitKeysFor({ Surprise: [1] }, "surprised")).toEqual(["Surprise"]);
+    expect(portraitKeysFor({ embarassment: [1] }, "embarrassed")).toEqual(["embarassment"]);
+    expect(portraitKeysFor(images, "angry")).toEqual([]);
+    expect(portraitKeysFor(images, "WAVE")).toEqual(["wave"]);
+    expect(talkingKeyFor(images, "Sadness", "_talk")).toBe("sadness_talk");
+    expect(talkingKeyFor(images, "happy", "_talk")).toBeNull();
   });
 
   it("finds synonym keys in a map", () => {

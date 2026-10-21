@@ -1,7 +1,7 @@
 {
   "name": "cypals",
   "private": true,
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "CyPals — AI companions with 3D, Live2D and portrait avatars, for Android, Windows and Linux.",
   "type": "module",
   "license": "AGPL-3.0-or-later",

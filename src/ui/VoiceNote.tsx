@@ -18,7 +18,9 @@ export function VoiceNoteButton({ disabled, onTranscribed, onActiveChange }: { d
   const [state, setState] = useState<"idle" | "recording" | "transcribing">("idle");
   const [elapsed, setElapsed] = useState(0);
   const [level, setLevel] = useState(0);
-  useEffect(() => onActiveChange?.(state === "recording"), [state, onActiveChange]);
+  useEffect(() => {
+    onActiveChange?.(state === "recording");
+  }, [state, onActiveChange]);
   const buf = useRef(new PcmBuffer());
   const release = useRef<(() => void) | null>(null);
   const started = useRef(0);

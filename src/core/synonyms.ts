@@ -164,15 +164,36 @@ export function findExpressionKey<T>(map: Record<string, T>, expr: Expression): 
 }
 
 /**
- * Key for a portrait image from its file or asset name: "Sadness.png" → "sad",
- * "Surprise_talk.png" → "surprised_talk", "wave.png" → "wave" (actions keep their name),
- * anything unrecognised keeps its cleaned name.
+ * Key for a portrait image from its file or asset name: the name exactly as given,
+ * minus folders and the extension ("Sadness.png" → "Sadness"). Files are never
+ * renamed; synonyms are resolved when an image is looked up (see portraitKeysFor).
  */
-export function portraitKeyFor(name: string, talkSuffix = "_talk"): string {
-  const base = name.split(/[\\/]/).pop()!.replace(/\.[a-z0-9]+$/i, "").toLowerCase().replace(/[\s-]+/g, "_");
-  const suffix = talkSuffix.toLowerCase();
-  const talking = !!suffix && base.endsWith(suffix) && base.length > suffix.length;
-  const core = (talking ? base.slice(0, -suffix.length) : base).replace(/_?\d+$/, "") || "neutral";
-  const canon = canonicalExpression(core);
-  return `${canon ?? core}${talking ? suffix : ""}`;
+export function portraitKeyFromFile(name: string): string {
+  return name.split(/[\\/]/).pop()!.replace(/\.[a-z0-9]+$/i, "").trim() || "image";
+}
+
+/** True for a talking frame's key, e.g. "Sadness_talk" with suffix "_talk". */
+export function isTalkingKey(key: string, suffix: string): boolean {
+  return !!suffix && key.length > suffix.length && key.toLowerCase().endsWith(suffix.toLowerCase());
+}
+
+/**
+ * Every key in a portrait set that shows `wanted` — the same key in any letter case,
+ * plus any key that means the same expression ("sad", "sadness", "Sad_2") — excluding
+ * talking frames. All matches are pooled, so several images rotate for variety.
+ */
+export function portraitKeysFor(images: Record<string, readonly unknown[]>, wanted: string, talkingSuffix = "_talk"): string[] {
+  const keys = Object.keys(images).filter((k) => images[k].length && !isTalkingKey(k, talkingSuffix));
+  const w = wanted.toLowerCase();
+  const exact = keys.filter((k) => k.toLowerCase() === w);
+  const e = canonicalExpression(wanted);
+  const same = e ? keys.filter((k) => !exact.includes(k) && canonicalExpression(k) === e) : [];
+  return [...exact, ...same];
+}
+
+/** The talking-frame key that belongs to `base`, if the set has one. */
+export function talkingKeyFor(images: Record<string, readonly unknown[]>, base: string, talkingSuffix: string): string | null {
+  if (!talkingSuffix) return null;
+  const want = `${base}${talkingSuffix}`.toLowerCase();
+  return Object.keys(images).find((k) => k.toLowerCase() === want && images[k].length) ?? null;
 }

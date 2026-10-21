@@ -1,4 +1,4 @@
-# Development status — v0.2.0
+# Development status — v0.2.1
 
 ## Verified
 
@@ -29,6 +29,17 @@ Manually, in the Linux release build (Xvfb + compositor, fake streaming OpenAI-c
 - Roleplay: card greeting, narration styled, paragraphs kept, regenerate.
 - Avatar framing by drag and scroll on a VRM model without reloading it; call-window options under the preview; Voice & behaviour tab.
 - Light/dark themes and tints (palette contrast is unit-tested for every preset).
+
+## Fixed in 0.2.1
+
+- "Something went wrong" when leaving Talk: Chrome 149 / WebView2 made `scrollIntoView` return a Promise, which a one-line
+  effect handed to React as its cleanup. Reproduced in Chromium with a Promise-returning `scrollIntoView`, fixed, and guarded
+  by `tests/effects.test.ts`.
+- Model list: the browser's `<datalist>` filtered suggestions by the text already in the field ("openrouter/auto" → 2 models).
+  Replaced with a searchable picker over the provider's full list (OpenRouter names, context size, image support, free filter;
+  Gemini and Anthropic paging). Picking a model sets "accepts images" and caps the context size to what the model supports.
+- Portrait imports no longer rename files (`sadness.png` stays "sadness"). Synonyms are resolved when an image is shown and for
+  the "No image yet" notice; all images meaning one expression rotate as variants. Actions match by exact name only.
 
 ## Not yet verified
 

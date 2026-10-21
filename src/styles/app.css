@@ -431,3 +431,20 @@ input[type="checkbox"] { accent-color: var(--glass); width: 18px; height: 18px; 
 .avatar-preview > * { flex-shrink: 0; }
 .avatar-preview .framing-target { position: sticky; top: 0; z-index: 2; user-select: none; box-shadow: 0 8px 18px var(--shadow); }
 .field > .mode-switch { align-self: flex-start; }
+
+/* Model picker */
+.model-picker { grid-column: 1 / -1; }
+.model-picker > .row > input { flex: 1; min-width: 0; }
+.model-panel { margin-top: 8px; padding: 10px; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--ink-2); display: flex; flex-direction: column; gap: 8px; }
+.model-tools input { flex: 1; min-width: 0; }
+.model-filters { gap: 6px; flex-wrap: wrap; }
+.model-list { list-style: none; margin: 0; padding: 0; max-height: 340px; overflow-y: auto; overscroll-behavior: contain; border-radius: var(--r-sm); }
+.model-list button { width: 100%; display: grid; grid-template-columns: 1fr auto; column-gap: 10px; align-items: center; text-align: left; padding: 7px 10px; border: 0; border-radius: var(--r-sm); background: none; color: var(--paper); font: inherit; cursor: pointer; }
+.model-list button:hover, .model-list button:focus-visible { background: var(--ink-3); outline: none; }
+.model-list button[aria-selected="true"] { background: var(--ink-3); box-shadow: inset 3px 0 0 var(--glass); }
+.model-name { grid-column: 1; font-weight: 700; overflow-wrap: anywhere; }
+.model-id { grid-column: 1; color: var(--mist); font-size: 0.8rem; font-family: ui-monospace, monospace; overflow-wrap: anywhere; }
+.model-tags { grid-column: 2; grid-row: 1 / span 2; display: flex; gap: 4px; }
+.model-tags .tag { padding: 1px 7px; border-radius: 999px; font-size: 0.72rem; color: var(--mist); border: 1px solid var(--line); white-space: nowrap; }
+.model-tags .tag-free { color: var(--on-glass); background: var(--glass); border-color: var(--glass); }
+.model-error { color: var(--danger); }

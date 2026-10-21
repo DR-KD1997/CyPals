@@ -117,6 +117,8 @@ describe("card parsing", () => {
         assets: [
           { type: "icon", uri: "embeded://assets/icon/main.png", name: "main", ext: "png" },
           { type: "emotion", uri: "embeded://assets/emotion/happy.png", name: "happy", ext: "png" },
+          { type: "emotion", uri: "embeded://assets/emotion/sadness.png", name: "sadness", ext: "png" },
+          { type: "emotion", uri: "embeded://assets/emotion/sad.png", name: "sad", ext: "png" },
         ],
       },
     };
@@ -124,17 +126,21 @@ describe("card parsing", () => {
       "card.json": strToU8(JSON.stringify(card)),
       "assets/icon/main.png": BLANK_PNG,
       "assets/emotion/happy.png": BLANK_PNG,
+      "assets/emotion/sadness.png": BLANK_PNG,
+      "assets/emotion/sad.png": BLANK_PNG,
     });
     const parsed = parseCardFile(zip, "mira.charx");
-    expect(parsed.images.map((i) => i.role).sort()).toEqual(["emotion", "icon"]);
+    expect(parsed.images.map((i) => i.role).sort()).toEqual(["emotion", "emotion", "emotion", "icon"]);
     const { companion, assets } = companionFromCard(parsed);
     const av = companion.avatars[0];
     expect(av.kind).toBe("portraits");
     if (av.kind === "portraits") {
-      expect(Object.keys(av.images).sort()).toEqual(["happy", "neutral"]);
+      // Names are kept as the card gives them: "sadness" isn't renamed to "sad".
+      expect(Object.keys(av.images).sort()).toEqual(["happy", "neutral", "sad", "sadness"]);
+      expect(Object.values(av.images).every((refs) => refs.length === 1)).toBe(true);
       expect(av.fallback).toBe("neutral");
     }
-    expect(assets.size).toBe(2);
+    expect(assets.size).toBe(4);
   });
 
   it("round-trips through PNG export (V2 + V3 chunks)", () => {

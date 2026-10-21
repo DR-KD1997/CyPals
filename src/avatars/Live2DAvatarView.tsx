@@ -61,7 +61,9 @@ export function Live2DAvatarView({ companion, avatar, framing, reduceMotion, onE
   framingRef.current = avatar.framing ?? DEFAULT_FRAMING;
   const relayout = useRef<() => void>(() => {});
   const framingKey = JSON.stringify(framingRef.current);
-  useEffect(() => relayout.current(), [framingKey]);
+  useEffect(() => {
+    relayout.current();
+  }, [framingKey]);
   const [needsCore, setNeedsCore] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const notify = useStore((s) => s.notify);

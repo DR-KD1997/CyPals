@@ -12,7 +12,7 @@ import { asString, asStringArray, base64ToBytes, bytesToBase64, isRecord, uid, u
 import { isPng, readTextChunks, writeTextChunks, BLANK_PNG } from "./png";
 import { lorebookFromCharacterBook, lorebookToCharacterBook } from "../lorebook/convert";
 import { defaultCompanion } from "../defaults";
-import { portraitKeyFor } from "../synonyms";
+import { canonicalExpression, portraitKeyFromFile, portraitKeysFor } from "../synonyms";
 
 export type CardVersion = "ccv1" | "ccv2" | "ccv3";
 
@@ -191,7 +191,7 @@ export function companionFromCard(card: ParsedCard, origin?: string): { companio
 
   const portraitImages: Record<string, AssetRef[]> = {};
   // The card icon is only a stand-in for "neutral" when the card ships no neutral emotion image.
-  const hasNeutralEmotion = card.images.some((i) => i.role === "emotion" && portraitKeyFor(i.name) === "neutral");
+  const hasNeutralEmotion = card.images.some((i) => i.role === "emotion" && canonicalExpression(portraitKeyFromFile(i.name)) === "neutral");
   for (const img of card.images) {
     if (img.role === "icon" && hasNeutralEmotion) {
       assets.set(img.path, img.bytes); // kept for card re-export
@@ -204,7 +204,7 @@ export function companionFromCard(card: ParsedCard, origin?: string): { companio
     }
     if (img.role !== "icon" && img.role !== "emotion") continue;
     assets.set(img.path, img.bytes);
-    const key = img.role === "icon" ? "neutral" : portraitKeyFor(img.name);
+    const key = img.role === "icon" ? "neutral" : portraitKeyFromFile(img.name);
     (portraitImages[key] ??= []).push({ path: img.path, mime: img.mime });
   }
   if (Object.keys(portraitImages).length) {
@@ -213,7 +213,7 @@ export function companionFromCard(card: ParsedCard, origin?: string): { companio
       kind: "portraits",
       label: "Card portraits",
       images: portraitImages,
-      fallback: portraitImages.neutral ? "neutral" : Object.keys(portraitImages)[0],
+      fallback: portraitKeysFor(portraitImages, "neutral")[0] ?? Object.keys(portraitImages)[0],
       transitionMs: 180,
       talkingSuffix: "_talk",
     };

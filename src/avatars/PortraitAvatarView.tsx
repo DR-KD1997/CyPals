@@ -8,7 +8,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { DEFAULT_FRAMING, type Companion, type PortraitAvatar } from "../core/types";
 import { live, subscribeLive } from "../state/live";
 import { assetUrl } from "../state/assets";
-import { canonicalExpression, findExpressionKey } from "../core/synonyms";
+import { portraitKeysFor, talkingKeyFor } from "../core/synonyms";
 
 interface Props {
   companion: Companion;
@@ -21,6 +21,8 @@ export function PortraitAvatarView({ companion, avatar, framing, reduceMotion }:
   const imagesKey = JSON.stringify(avatar.images);
   const [urls, setUrls] = useState<Record<string, string[]>>({});
   const [key, setKey] = useState(avatar.fallback);
+  /** An action image (e.g. "wave") briefly replacing the expression; matched by exact name only. */
+  const [actionKey, setActionKey] = useState<string | null>(null);
   const [variant, setVariant] = useState(0);
   const [layers, setLayers] = useState<{ a: string; b: string; showB: boolean }>({ a: "", b: "", showB: false });
   const [motion, setMotion] = useState<string | null>(null);
@@ -49,10 +51,11 @@ export function PortraitAvatarView({ companion, avatar, framing, reduceMotion }:
       const action = st.actions.shift();
       if (action) {
         const a = String(action);
-        if (avatar.images[a]?.length) {
+        const match = Object.keys(avatar.images).find((k) => k.toLowerCase() === a.toLowerCase() && avatar.images[k].length);
+        if (match) {
           actionImgUntil.current = performance.now() + 1400;
-          setKey(a);
-          setTimeout(() => setKey(live(companion.id).expression), 1400);
+          setActionKey(match);
+          setTimeout(() => setActionKey(null), 1400);
         } else if (!reduceMotion) {
           setMotion(a);
           setTimeout(() => setMotion(null), 900);
@@ -81,20 +84,24 @@ export function PortraitAvatarView({ companion, avatar, framing, reduceMotion }:
   }, [companion.id, avatar.talkingSuffix]);
 
   const src = useMemo(() => {
-    const pickFrom = (k: string) => {
-      const list = urls[k];
-      return list?.length ? list[variant % list.length] : "";
-    };
-    // Keys may be synonyms ("sadness", "Surprise"): resolve the expression to whichever key the set uses.
-    const resolved = urls[key]?.length ? key : (() => {
-      const e = canonicalExpression(key);
-      return e ? findExpressionKey(Object.fromEntries(Object.entries(urls).filter(([, v]) => v.length)), e) : null;
-    })();
-    const base = resolved ?? (urls[avatar.fallback]?.length ? avatar.fallback : Object.keys(urls).find((k) => urls[k].length));
-    if (!base) return "";
-    if (talking && urls[`${base}${avatar.talkingSuffix}`]?.length) return pickFrom(`${base}${avatar.talkingSuffix}`);
-    return pickFrom(base);
-  }, [urls, key, variant, talking, avatar.fallback, avatar.talkingSuffix]);
+    // Image names are kept as the user gave them ("Sadness", "sad_2"…). Every key that
+    // means the wanted expression is pooled, and the images rotate for variety.
+    const pool = (wanted: string) => portraitKeysFor(urls, wanted, avatar.talkingSuffix).flatMap((k) => urls[k].map((u) => ({ k, u })));
+    let choices = actionKey && urls[actionKey]?.length ? urls[actionKey].map((u) => ({ k: actionKey, u })) : pool(key);
+    if (!choices.length) choices = pool(avatar.fallback);
+    if (!choices.length) {
+      const any = Object.keys(urls).find((k) => urls[k].length);
+      if (!any) return "";
+      choices = urls[any].map((u) => ({ k: any, u }));
+    }
+    const pick = choices[variant % choices.length];
+    const talkKey = talking ? talkingKeyFor(urls, pick.k, avatar.talkingSuffix) : null;
+    if (talkKey) {
+      const frames = urls[talkKey];
+      return frames[variant % frames.length];
+    }
+    return pick.u;
+  }, [urls, key, actionKey, variant, talking, avatar.fallback, avatar.talkingSuffix]);
 
   // Two-layer crossfade (skipped for mouth flaps so they stay snappy).
   useEffect(() => {
